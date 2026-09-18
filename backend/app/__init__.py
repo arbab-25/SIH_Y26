@@ -1,0 +1,1 @@
+"""CODE MAZE Backend Application."""

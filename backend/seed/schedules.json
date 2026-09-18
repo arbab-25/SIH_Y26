@@ -1,0 +1,444 @@
+{
+  "rule_7_2_table_1": {
+    "title": "Rule 7(2) Table-I: Minimum height of numerals and letters",
+    "columns": [
+      "Area of Principal Display Panel (A)",
+      "Normal case (mm)",
+      "Blown, formed, moulded, embossed or perforated (mm)"
+    ],
+    "rows": [
+      {
+        "pdp_area": "A ≤ 50 cm²",
+        "max_area_sq_cm": 50,
+        "min_height_normal_mm": 1.0,
+        "min_height_blown_mm": 1.5
+      },
+      {
+        "pdp_area": "50 < A ≤ 100 cm²",
+        "max_area_sq_cm": 100,
+        "min_height_normal_mm": 1.5,
+        "min_height_blown_mm": 3.0
+      },
+      {
+        "pdp_area": "100 < A ≤ 500 cm²",
+        "max_area_sq_cm": 500,
+        "min_height_normal_mm": 2.5,
+        "min_height_blown_mm": 4.0
+      },
+      {
+        "pdp_area": "500 < A ≤ 2500 cm²",
+        "max_area_sq_cm": 2500,
+        "min_height_normal_mm": 4.0,
+        "min_height_blown_mm": 6.0
+      },
+      {
+        "pdp_area": "A > 2500 cm²",
+        "max_area_sq_cm": 999999,
+        "min_height_normal_mm": 6.0,
+        "min_height_blown_mm": 6.0
+      }
+    ]
+  },
+  "first_schedule_table_1": {
+    "title": "First Schedule Table-I: Maximum permissible errors on net quantity declared by weight or volume",
+    "columns": [
+      "Declared quantity (g or ml)",
+      "Maximum permissible error as % of declared qty",
+      "or g or ml"
+    ],
+    "rows": [
+      {
+        "range": "Up to 50",
+        "error_percent": 9.0,
+        "error_fixed": null
+      },
+      {
+        "range": "50 to 100",
+        "error_percent": null,
+        "error_fixed": 4.5
+      },
+      {
+        "range": "100 to 200",
+        "error_percent": 4.5,
+        "error_fixed": null
+      },
+      {
+        "range": "200 to 300",
+        "error_percent": null,
+        "error_fixed": 9.0
+      },
+      {
+        "range": "300 to 500",
+        "error_percent": 3.0,
+        "error_fixed": null
+      },
+      {
+        "range": "500 to 1000",
+        "error_percent": null,
+        "error_fixed": 15.0
+      },
+      {
+        "range": "1000 to 10000",
+        "error_percent": 1.5,
+        "error_fixed": null
+      },
+      {
+        "range": "10000 to 15000",
+        "error_percent": null,
+        "error_fixed": 150.0
+      },
+      {
+        "range": "Above 15000",
+        "error_percent": 1.0,
+        "error_fixed": null
+      }
+    ]
+  },
+  "second_schedule_commodities": [
+    {
+      "commodity": "Biscuits",
+      "unit": "g",
+      "allowed_values": [
+        25,
+        50,
+        75,
+        100,
+        150,
+        200,
+        250,
+        300,
+        350,
+        400,
+        500,
+        1000,
+        1500,
+        2000,
+        2500,
+        3000,
+        3500,
+        4000,
+        4500,
+        5000
+      ],
+      "rule_ref": "Rule 5, Second Schedule Item 1"
+    },
+    {
+      "commodity": "Bread",
+      "unit": "g",
+      "allowed_values": [
+        50,
+        100,
+        200,
+        300,
+        400,
+        500,
+        600,
+        700,
+        800,
+        900,
+        1000
+      ],
+      "rule_ref": "Rule 5, Second Schedule Item 2"
+    },
+    {
+      "commodity": "Tea",
+      "unit": "g",
+      "allowed_values": [
+        25,
+        50,
+        100,
+        250,
+        500,
+        1000,
+        2000,
+        3000,
+        4000,
+        5000
+      ],
+      "rule_ref": "Rule 5, Second Schedule Item 3"
+    },
+    {
+      "commodity": "Coffee",
+      "unit": "g",
+      "allowed_values": [
+        25,
+        50,
+        100,
+        200,
+        500,
+        1000
+      ],
+      "rule_ref": "Rule 5, Second Schedule Item 4"
+    },
+    {
+      "commodity": "Baby food",
+      "unit": "g",
+      "allowed_values": [
+        200,
+        400,
+        500,
+        1000
+      ],
+      "rule_ref": "Rule 5, Second Schedule Item 5"
+    },
+    {
+      "commodity": "Weaning food",
+      "unit": "g",
+      "allowed_values": [
+        200,
+        400,
+        500,
+        1000
+      ],
+      "rule_ref": "Rule 5, Second Schedule Item 6"
+    },
+    {
+      "commodity": "Milk powder",
+      "unit": "g",
+      "allowed_values": [
+        100,
+        200,
+        500,
+        1000
+      ],
+      "rule_ref": "Rule 5, Second Schedule Item 7"
+    },
+    {
+      "commodity": "Edible oils, vanaspati, ghee",
+      "unit": "g_or_ml",
+      "allowed_values": [
+        50,
+        100,
+        200,
+        500,
+        1000,
+        2000,
+        3000,
+        5000
+      ],
+      "rule_ref": "Rule 5, Second Schedule Item 8"
+    },
+    {
+      "commodity": "Rice and wheat flour",
+      "unit": "g_or_kg",
+      "allowed_values": [
+        100,
+        200,
+        500,
+        1000,
+        2000,
+        5000,
+        10000
+      ],
+      "rule_ref": "Rule 5, Second Schedule Item 9"
+    },
+    {
+      "commodity": "Pulses",
+      "unit": "g_or_kg",
+      "allowed_values": [
+        100,
+        200,
+        500,
+        1000,
+        2000,
+        5000
+      ],
+      "rule_ref": "Rule 5, Second Schedule Item 10"
+    },
+    {
+      "commodity": "Salt",
+      "unit": "g_or_kg",
+      "allowed_values": [
+        100,
+        200,
+        500,
+        1000,
+        2000,
+        5000
+      ],
+      "rule_ref": "Rule 5, Second Schedule Item 11"
+    },
+    {
+      "commodity": "Detergent powder",
+      "unit": "g_or_kg",
+      "allowed_values": [
+        50,
+        100,
+        200,
+        500,
+        1000,
+        2000,
+        3000,
+        4000,
+        5000
+      ],
+      "rule_ref": "Rule 5, Second Schedule Item 12"
+    },
+    {
+      "commodity": "Washing soap/cake",
+      "unit": "g",
+      "allowed_values": [
+        50,
+        75,
+        100,
+        125,
+        150,
+        200,
+        250,
+        300
+      ],
+      "rule_ref": "Rule 5, Second Schedule Item 13"
+    },
+    {
+      "commodity": "Toilet soap",
+      "unit": "g",
+      "allowed_values": [
+        25,
+        50,
+        75,
+        100,
+        125,
+        150
+      ],
+      "rule_ref": "Rule 5, Second Schedule Item 14"
+    },
+    {
+      "commodity": "Aerated soft drink",
+      "unit": "ml",
+      "allowed_values": [
+        100,
+        150,
+        200,
+        250,
+        300,
+        330,
+        500,
+        600,
+        750,
+        1000,
+        1250,
+        1500,
+        1750,
+        2000,
+        2250,
+        2500
+      ],
+      "rule_ref": "Rule 5, Second Schedule Item 15"
+    },
+    {
+      "commodity": "Mineral water and packaged drinking water",
+      "unit": "ml",
+      "allowed_values": [
+        100,
+        150,
+        200,
+        250,
+        300,
+        500,
+        750,
+        1000,
+        1500,
+        2000,
+        3000,
+        4000,
+        5000
+      ],
+      "rule_ref": "Rule 5, Second Schedule Item 16"
+    },
+    {
+      "commodity": "Paint, varnish",
+      "unit": "ml_or_l",
+      "allowed_values": [
+        50,
+        100,
+        200,
+        500,
+        1000,
+        2000,
+        4000,
+        5000,
+        10000,
+        20000
+      ],
+      "rule_ref": "Rule 5, Second Schedule Item 17"
+    },
+    {
+      "commodity": "Cement",
+      "unit": "kg",
+      "allowed_values": [
+        1,
+        2,
+        5,
+        10,
+        20,
+        25,
+        50
+      ],
+      "rule_ref": "Rule 5, Second Schedule Item 18"
+    },
+    {
+      "commodity": "Fertilizers",
+      "unit": "kg",
+      "allowed_values": [
+        1,
+        2,
+        5,
+        10,
+        20,
+        25,
+        50
+      ],
+      "rule_ref": "Rule 5, Second Schedule Item 19"
+    }
+  ],
+  "fifth_schedule_sampling": {
+    "title": "Fifth Schedule: Sample size and correction factor",
+    "columns": [
+      "Lot size (N)",
+      "Sample size (n)",
+      "Correction factor (k)",
+      "Number of packages for destructive test"
+    ],
+    "rows": [
+      {
+        "lot_min": 100,
+        "lot_max": 500,
+        "sample_size": 50,
+        "correction_factor": 0.379,
+        "destructive_sample": 3
+      },
+      {
+        "lot_min": 501,
+        "lot_max": 3200,
+        "sample_size": 80,
+        "correction_factor": 0.295,
+        "destructive_sample": 5
+      },
+      {
+        "lot_min": 3201,
+        "lot_max": 9999999,
+        "sample_size": 125,
+        "correction_factor": 0.234,
+        "destructive_sample": 7
+      }
+    ]
+  },
+  "third_schedule_when_packed": [
+    "Camphor",
+    "Cereals and pulses",
+    "Dry fruits and nuts",
+    "Edible oil, vanaspati and ghee",
+    "Fertilizers",
+    "Fresh fruits and vegetables",
+    "Gur (Jaggery)",
+    "Ice cream",
+    "Nails, screws and nuts",
+    "Soap and detergent"
+  ],
+  "fourth_schedule_exceptions": [
+    "Packages containing commodities which are exempted by central government notification",
+    "Commodities sold in liquid form where quantity declaration by weight is permissible",
+    "Thread which is sold in coil to handloom weavers",
+    "Packages containing commodities weighing or measuring 10g or 10ml or less (except tobacco products)"
+  ]
+}
