@@ -20,6 +20,9 @@ config = context.config
 # Override sqlalchemy.url with environment variable if available
 database_url = settings.DATABASE_URL_SYNC
 if database_url:
+    # pg8000 does not support sslmode in the URL, requires connect_args instead
+    if "pg8000" in database_url:
+        database_url = database_url.replace("?sslmode=require", "").replace("&sslmode=require", "")
     config.set_main_option("sqlalchemy.url", database_url)
 
 if config.config_file_name is not None:
@@ -43,10 +46,16 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode."""
+    url_str = config.get_main_option("sqlalchemy.url", "")
+    connect_args = {}
+    if "pg8000" in url_str:
+        connect_args = {"ssl_context": True}
+
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args=connect_args,
     )
     with connectable.connect() as connection:
         context.configure(
