@@ -13,11 +13,16 @@ from app.database import Base
 # Import all models so Alembic can detect them
 from app.models import *  # noqa: F401, F403
 
+from app.config import settings
+
 config = context.config
 
 # Override sqlalchemy.url with environment variable if available
-database_url = os.getenv("DATABASE_URL_SYNC")
+database_url = settings.DATABASE_URL_SYNC
 if database_url:
+    # Switch from pg8000 to psycopg2 to fix Neon SSL issues natively
+    if "postgresql+pg8000://" in database_url:
+        database_url = database_url.replace("postgresql+pg8000://", "postgresql://")
     config.set_main_option("sqlalchemy.url", database_url)
 
 if config.config_file_name is not None:

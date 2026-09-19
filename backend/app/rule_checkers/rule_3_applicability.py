@@ -26,7 +26,7 @@ def check_rule_3_applicability(
             status=Verdict.COMPLIANT,
             confidence=1.0,
             rule_ref="rule-3",
-            message_en="Package is exempt from Chapter II as it is meant for industrial or institutional consumers.",
+            message_en="Exempt: Package is exempt from Chapter II as it is meant for industrial or institutional consumers.",
             message_hi="पैकेज अध्याय II से मुक्त है क्योंकि यह औद्योगिक या संस्थागत उपभोक्ताओं के लिए है।",
             quoted_rule_text=quoted_text,
             severity="MINOR"
@@ -36,9 +36,10 @@ def check_rule_3_applicability(
 
     if net_quantity_value is not None and net_quantity_unit:
         unit = net_quantity_unit.lower()
+        is_cement_or_fert = any(c in cat_lower for c in ["cement", "fertilizer", "farm"])
 
-        # Cement/Fertilizer > 50kg exemption
-        if any(c in cat_lower for c in ["cement", "fertilizer", "farm"]):
+        # Cement/Fertilizer/Agricultural farm produce > 50kg exemption
+        if is_cement_or_fert:
             if unit in ["kg", "kilogram"] and net_quantity_value > 50:
                 return CheckResult(
                     field="applicability",
@@ -50,20 +51,20 @@ def check_rule_3_applicability(
                     quoted_rule_text=quoted_text,
                     severity="MINOR"
                 )
-
-        # General > 25kg or > 25L exemption
-        if (unit in ["kg", "kilogram"] and net_quantity_value > 25) or \
-           (unit in ["l", "litre", "liter"] and net_quantity_value > 25):
-            return CheckResult(
-                field="applicability",
-                status=Verdict.COMPLIANT,
-                confidence=1.0,
-                rule_ref="rule-3",
-                message_en=f"Exempt from Chapter II: Package quantity exceeds 25kg/25L ({net_quantity_value} {unit}).",
-                message_hi=f"अध्याय II से छूट: पैकेज की मात्रा 25 किग्रा/25 लीटर से अधिक है ({net_quantity_value} {unit})।",
-                quoted_rule_text=quoted_text,
-                severity="MINOR"
-            )
+        else:
+            # General > 25kg or > 25L exemption (for commodities other than cement/fertilizer/farm)
+            if (unit in ["kg", "kilogram"] and net_quantity_value > 25) or \
+               (unit in ["l", "litre", "liter"] and net_quantity_value > 25):
+                return CheckResult(
+                    field="applicability",
+                    status=Verdict.COMPLIANT,
+                    confidence=1.0,
+                    rule_ref="rule-3",
+                    message_en=f"Exempt from Chapter II: Package quantity exceeds 25kg/25L ({net_quantity_value} {unit}).",
+                    message_hi=f"अध्याय II से छूट: पैकेज की मात्रा 25 किग्रा/25 लीटर से अधिक है ({net_quantity_value} {unit})।",
+                    quoted_rule_text=quoted_text,
+                    severity="MINOR"
+                )
 
     return CheckResult(
         field="applicability",

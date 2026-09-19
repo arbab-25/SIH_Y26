@@ -11,7 +11,12 @@ from rapidfuzz import process, fuzz
 
 
 def load_second_schedule() -> List[Dict[str, Any]]:
-    schedules_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "seed", "schedules.json")
+    # backend root is 3 levels up from this file (app/rule_checkers/rule_5_pack_sizes.py)
+    backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    schedules_path = os.path.join(backend_dir, "seed", "schedules.json")
+    if not os.path.exists(schedules_path):
+        # Fallback to app/seed/schedules.json
+        schedules_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "seed", "schedules.json")
     if os.path.exists(schedules_path):
         with open(schedules_path, encoding="utf-8") as f:
             data = json.load(f)
@@ -67,13 +72,13 @@ def check_second_schedule_pack_size(
             severity="MINOR"
         )
 
-    # Match commodity using fuzzy search
+    # Match commodity using fuzzy search (token_set_ratio prevents false substring positives)
     comm_names = [c["commodity"] for c in commodities]
     match = process.extractOne(
         commodity_or_product_name,
         comm_names,
-        scorer=fuzz.partial_ratio,
-        score_cutoff=65
+        scorer=fuzz.token_set_ratio,
+        score_cutoff=70
     )
 
     if not match:

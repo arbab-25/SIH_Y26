@@ -22,8 +22,8 @@ class FieldOverride(Base):
     old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
     new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    overridden_by: Mapped[uuid.UUID] = mapped_column(
-        UUID_TYPE, ForeignKey("users.id"), nullable=False
+    overridden_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID_TYPE, ForeignKey("users.id"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, nullable=False

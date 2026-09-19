@@ -1,51 +1,63 @@
-# Python
+# ── Python ────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *.egg-info/
-dist/
+*.egg
 build/
 .eggs/
-*.egg
 venv/
 .venv/
 env/
 
-# Node
+# ── Databases (never commit local SQLite) ─────────
+*.db
+*.sqlite
+*.sqlite3
+
+# ── Node ──────────────────────────────────────────
 node_modules/
 dist/
 .cache/
 
-# Environment
+# ── Environment secrets ───────────────────────────
 .env
 .env.local
 .env.*.local
 
-# IDE
+# ── Uploads & generated files (user data) ─────────
+backend/uploads/
+backend/temp/
+backend/**/uploads/
+backend/backend/
+ml/ml/
+
+# ── Test / Coverage ───────────────────────────────
+htmlcov/
+.coverage
+coverage.xml
+*.cover
+.pytest_cache/
+
+# ── IDE ───────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# OS
+# ── OS ────────────────────────────────────────────
 .DS_Store
 Thumbs.db
 
-# Docker
+# ── Docker overrides ──────────────────────────────
 docker-compose.override.yml
 
-# Uploads
-backend/uploads/
-backend/temp/
+# ── Reticle dev tool (not for production) ─────────
+.reticle.json
+frontend/src/reticle-dev.ts
 
-# Coverage
-htmlcov/
-.coverage
-coverage.xml
-*.cover
-
-# PyTest
-.pytest_cache/
-
-# Alembic
-*.pyc
+# ── Duplicate/scratch folders ─────────────────────
+ORIGNAL/
+.recovery-node-modules-incomplete/
+.agents/
+.neon

@@ -14,6 +14,12 @@ if not is_sqlite:
         "pool_size": 5,
         "max_overflow": 10,
     })
+    # Managed Postgres (Neon/Render) requires TLS. asyncpg does not accept the
+    # libpq 'sslmode' URL parameter, so SSL is configured explicitly here.
+    if "localhost" not in settings.DATABASE_URL and "127.0.0.1" not in settings.DATABASE_URL:
+        engine_kwargs["connect_args"] = {"ssl": "require"}
+    else:
+        engine_kwargs["connect_args"] = {"ssl": False}
 
 engine = create_async_engine(settings.DATABASE_URL, **engine_kwargs)
 
