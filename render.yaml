@@ -40,10 +40,7 @@ services:
         value: noreply@codemaze.app
       - key: DEBUG
         value: "false"
-    disk:
-      name: uploads
-      mountPath: /app/uploads
-      sizeGB: 1              # 1 GB persistent disk for uploaded label images
+
 
   # ── Frontend: React/Vite Static Site ──────────────────────────────────────
   - name: codemaze-frontend
