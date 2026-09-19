@@ -45,8 +45,8 @@ async def test_full_scan_report_workflow():
         assert "scan_id" in scan_data
         scan_id = scan_data["scan_id"]
 
-        # 2. Get scan details
-        detail_resp = await ac.get(f"/api/v1/scans/{scan_id}")
+        # 2. Get scan details (auth required: scan data is enforcement evidence)
+        detail_resp = await ac.get(f"/api/v1/scans/{scan_id}", headers=headers)
         assert detail_resp.status_code == 200
         details = detail_resp.json()
         assert "verdict" in details

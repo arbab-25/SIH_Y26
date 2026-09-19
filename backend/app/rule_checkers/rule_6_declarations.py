@@ -45,21 +45,40 @@ def check_manufacturer_details(
             severity="MAJOR"
         )
 
-    # Validate 6-digit Indian PIN code
+    # Validate 6-digit Indian PIN code (Rule 10(1))
     has_valid_pin = bool(pin_code and re.match(r"^[1-9]\d{5}$", str(pin_code)))
 
     if not has_valid_pin:
+        if not pin_code:
+            # Fail-closed per §3: the PIN was not READ, which is not proof the PIN is
+            # absent from the package — OCR may have missed the address block. A
+            # false NON_COMPLIANT is worse than a manual review.
+            return CheckResult(
+                field="manufacturer_address",
+                status=Verdict.NEEDS_REVIEW,
+                confidence=confidence,
+                rule_ref="rule-10-1",
+                message_en="Manufacturer/packer declared, but a 6-digit postal PIN code was not detected on the scanned panel. Manual review required (Rule 10(1)).",
+                message_hi="निर्माता/पैकर घोषित है, लेकिन स्कैन किए गए पैनल पर 6-अंकीय पोस्टल पिन कोड नहीं मिला। मैन्युअल समीक्षा आवश्यक है (नियम 10(1))।",
+                suggested_fix="Verify the complete postal address includes the 6-digit PIN code as required by Rule 10(1).",
+                quoted_rule_text=quoted_text,
+                bbox=bbox,
+                extracted_value=f"{name or ''}, {address or ''}",
+                severity="MAJOR"
+            )
+        # PIN was positively read but has an invalid format — that is positive
+        # evidence of a non-compliant declaration, so NON_COMPLIANT is warranted.
         return CheckResult(
             field="manufacturer_address",
             status=Verdict.NON_COMPLIANT,
             confidence=confidence,
             rule_ref="rule-10-1",
-            message_en=f"Manufacturer address is incomplete: missing valid 6-digit postal PIN code (found: '{pin_code or 'none'}').",
-            message_hi=f"निर्माता का पता अपूर्ण है: वैध 6-अंकीय पोस्टल पिन कोड गायब है (मिला: '{pin_code or 'कोई नहीं'}')।",
-            suggested_fix="Ensure complete postal address with 6-digit PIN code is declared as required by Rule 10(1).",
+            message_en=f"Manufacturer address declares PIN '{pin_code}', which is not a valid 6-digit Indian postal PIN code (Rule 10(1)).",
+            message_hi=f"निर्माता के पते में पिन '{pin_code}' घोषित है, जो वैध 6-अंकीय भारतीय पोस्टल पिन कोड नहीं है (नियम 10(1))।",
+            suggested_fix="Correct the declared PIN code to a valid 6-digit Indian postal PIN per Rule 10(1).",
             quoted_rule_text=quoted_text,
             bbox=bbox,
-            extracted_value=f"{name or ''}, {address or ''}",
+            extracted_value=f"{name or ''}, {address or ''} (PIN: {pin_code})",
             severity="MAJOR"
         )
 
@@ -89,14 +108,16 @@ def check_country_of_origin(
 
     if is_imported:
         if not country or confidence < settings.OCR_CONFIDENCE_THRESHOLD:
+            # Fail-closed per §3: not detected ≠ not declared — the origin may be
+            # printed on a panel the photo did not capture.
             return CheckResult(
                 field="country_of_origin",
-                status=Verdict.NON_COMPLIANT,
+                status=Verdict.NEEDS_REVIEW,
                 confidence=confidence,
                 rule_ref="rule-6-1-aa",
-                message_en="Country of origin is missing on imported package as mandated by Rule 6(1)(aa).",
-                message_hi="आयातित पैकेज पर नियम 6(1)(कक) के अनुसार मूल देश (Country of Origin) गायब है।",
-                suggested_fix="Declare 'Country of Origin: [Country Name]' prominently on the package.",
+                message_en="Country of origin was not detected on the scanned panel of this imported package. Manual review required (Rule 6(1)(aa)).",
+                message_hi="इस आयातित पैकेज के स्कैन किए गए पैनल पर मूल देश (Country of Origin) नहीं मिला। मैन्युअल समीक्षा आवश्यक है (नियम 6(1)(कक))।",
+                suggested_fix="Verify 'Country of Origin: [Country Name]' is declared on the package as required by Rule 6(1)(aa).",
                 quoted_rule_text=quoted_text,
                 bbox=bbox,
                 severity="MAJOR"
@@ -245,15 +266,18 @@ def check_mfg_date_declaration(
         )
 
     # Non-food articles
+    # Fail-closed per §3: a missing OCR read is NOT proof the declaration is
+    # absent — the photo may cover a different panel. Only genuinely unreadable
+    # fields go to NEEDS_REVIEW; NON_COMPLIANT is reserved for positive evidence.
     if not date_str or confidence < settings.OCR_CONFIDENCE_THRESHOLD:
         return CheckResult(
             field="mfg_date",
-            status=Verdict.NON_COMPLIANT,
+            status=Verdict.NEEDS_REVIEW,
             confidence=confidence,
             rule_ref="rule-6-1-d",
-            message_en="Month and year of manufacture, packing or import is missing as mandated by Rule 6(1)(d).",
-            message_hi="नियम 6(1)(घ) के तहत निर्माण, पैकिंग या आयात का महीना और वर्ष गायब है।",
-            suggested_fix="Declare month and year of manufacture/packing in format 'MM/YYYY' or 'Month YYYY'.",
+            message_en="Month and year of manufacture, packing or import was not detected on the scanned panel. Manual review required (Rule 6(1)(d)).",
+            message_hi="स्कैन किए गए पैनल पर निर्माण, पैकिंग या आयात का महीना और वर्ष नहीं मिला। मैन्युअल समीक्षा आवश्यक है (नियम 6(1)(घ))।",
+            suggested_fix="Verify the package declares month and year of manufacture/packing in format 'MM/YYYY' or 'Month YYYY'.",
             quoted_rule_text=quoted_text,
             bbox=bbox,
             severity="MAJOR"
@@ -284,14 +308,16 @@ def check_consumer_care_details(
     )
 
     if not phone and not email:
+        # Fail-closed per §3: not detected ≠ not declared. Most labels print
+        # consumer-care contacts on a side/back panel the photo may not cover.
         return CheckResult(
             field="consumer_care",
-            status=Verdict.NON_COMPLIANT,
+            status=Verdict.NEEDS_REVIEW,
             confidence=confidence,
             rule_ref="rule-6-2",
-            message_en="Consumer care contact details (telephone number and email) are completely missing.",
-            message_hi="उपभोक्ता सेवा संपर्क विवरण (टेलीफोन नंबर और ईमेल) पूरी तरह से गायब हैं।",
-            suggested_fix="Provide Consumer Care telephone number and email address as required by Rule 6(2).",
+            message_en="Consumer care contact details (telephone number and e-mail) were not detected on the scanned panel. Manual review required (Rule 6(2)).",
+            message_hi="स्कैन किए गए पैनल पर उपभोक्ता सेवा संपर्क विवरण (टेलीफोन नंबर और ईमेल) नहीं मिले। मैन्युअल समीक्षा आवश्यक है (नियम 6(2))।",
+            suggested_fix="Verify consumer care telephone number and e-mail address on the package as required by Rule 6(2).",
             quoted_rule_text=quoted_text,
             bbox=bbox,
             severity="MAJOR"

@@ -261,11 +261,32 @@ def extract_fields_from_ocr(items: List[Any], full_text: Optional[str] = None) -
     # ----------------------------------------------------
     # 6. Date of Manufacture / Packing / Import (Rule 6(1)(d))
     # ----------------------------------------------------
-    date_regex = re.compile(
-        r"(?:mfd|mfg|pkd|packed|manufactured|imported)?\s*[:\-.]?\s*(\b(?:0?[1-9]|1[0-2])[\/\.-](?:20)?\d{2}\b|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s\/\.-]+(?:20)?\d{2}\b)",
-        re.IGNORECASE
-    )
-    date_match = date_regex.search(combined_text)
+    # Pass 1 (keyword-anchored): a date line explicitly labelled mfd/mfg/pkd/
+    # manufactured/imported — prevents picking the Best-Before date or barcode
+    # digits on multi-date labels like 'MFG 05/2026 BB 05/2027'.
+    date_match = None
+    for line in text_lines:
+        line_match = re.search(
+            r"\b(?:mfd|mfg|mkd|pkd|packed|packaged|manufactured|manf|imported)\b[^0-9a-z]{0,12}"
+            r"((?:0?[1-9]|1[0-2])[/\-.](?:20)?\d{2}|"
+            r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[/\-. \\] \s*(?:20)?\d{2,4}|"
+            r"(?:20)?\d{2}[/\-.](?:0?[1-9]|1[0-2]))",
+            line,
+            re.IGNORECASE,
+        )
+        if line_match:
+            date_match = line_match
+            break
+
+    # Pass 2 (fallback): any plausible month/year token anywhere on the label
+    # (kept for bare panels where the keyword was OCR-mangled).
+    if not date_match:
+        date_match = re.search(
+            r"\b((?:0?[1-9]|1[0-2])[/\-.](?:20)?\d{2}\b|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s/\.-]+(?:20)?\d{2}\b)",
+            combined_text,
+            re.IGNORECASE,
+        )
+
     if date_match:
         raw_date = date_match.group(1)
         item_date = next((it for it in items if raw_date in it.text), items[0])
@@ -339,7 +360,7 @@ def extract_fields_from_ocr(items: List[Any], full_text: Optional[str] = None) -
                 line,
                 maxsplit=1,
                 flags=re.IGNORECASE,
-            )[0].strip(" :\-.,")
+            )[0].strip(" :.,-")
             words = cut.split()
             return " ".join(words[:limit]) if len(words) > limit else cut
         # Attach the confidence of the OCR item(s) that formed the header

@@ -86,7 +86,7 @@ async def create_report(
                 "field_key": v.field_key,
                 "message_en": v.message_en,
                 "suggested_fix": v.suggested_fix,
-                "rule_ref": f"rule-{v.field_key.replace('_', '-')}"
+                "rule_ref": getattr(v, "rule_ref", None) or f"rule-{v.field_key.replace('_', '-')}"
             }
             for v in scan.violations
         ],

@@ -197,12 +197,18 @@ def evaluate_product_compliance(
     results.append(r_cc)
 
     # 2.9 Minimum Letter & Numeral Height by PDP Area (Rule 7(2) Table-I)
-    r_font = check_letter_height_and_pdp_area(
-        pdp_height_cm=pdp_height_cm,
-        pdp_width_cm=pdp_width_cm,
-        measured_glyph_height_mm=measured_glyph_height_mm
-    )
-    results.append(r_font)
+    # Only evaluated when physical dimensions are supplied. Rule 7(2) cannot be
+    # measured from a photo alone; running it unconditionally forced EVERY scan
+    # into a constant NEEDS_REVIEW verdict even when all declarations read clean.
+    # Per §3 we never guess: absent dimensions means the check is skipped (and
+    # surfaced as a note in the UI), not a package-wide NEEDS_REVIEW.
+    if pdp_height_cm is not None and pdp_width_cm is not None:
+        r_font = check_letter_height_and_pdp_area(
+            pdp_height_cm=pdp_height_cm,
+            pdp_width_cm=pdp_width_cm,
+            measured_glyph_height_mm=measured_glyph_height_mm
+        )
+        results.append(r_font)
 
     # -----------------------------------------------------------------
     # STEP 3: FSSAI & Food Regulations (if category=food)
@@ -226,9 +232,14 @@ def evaluate_product_compliance(
     # STEP 4: Compute Overall Verdict & Compliance Score
     # -----------------------------------------------------------------
     evaluation.results = results
-    violations = [r for r in results if r.status == Verdict.NON_COMPLIANT]
-    needs_review = [r for r in results if r.status == Verdict.NEEDS_REVIEW]
-    compliant = [r for r in results if r.status == Verdict.COMPLIANT]
+    # Informational entries (e.g. "FSSAI checks unavailable" when fssai.pdf is
+    # not attached) are displayed but must NOT gate the verdict or the score —
+    # skipping a check is not a finding.
+    informational_refs = {"fssai-notice"}
+    scoping_results = [r for r in results if r.rule_ref not in informational_refs]
+    violations = [r for r in scoping_results if r.status == Verdict.NON_COMPLIANT]
+    needs_review = [r for r in scoping_results if r.status == Verdict.NEEDS_REVIEW]
+    compliant = [r for r in scoping_results if r.status == Verdict.COMPLIANT]
 
     evaluation.violations = violations
 
@@ -240,8 +251,8 @@ def evaluate_product_compliance(
     else:
         evaluation.verdict = Verdict.COMPLIANT
 
-    # Compliance score = compliant / applicable fields %
-    total_applicable = len(results)
+    # Compliance score = compliant / applicable fields % (informational entries excluded)
+    total_applicable = len(scoping_results)
     evaluation.compliance_score = (len(compliant) / max(1, total_applicable)) * 100.0
 
     # -----------------------------------------------------------------

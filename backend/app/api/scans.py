@@ -28,6 +28,21 @@ from app.utils.rate_limit import check_rate_limit
 router = APIRouter(prefix="/scans", tags=["Scans"])
 
 
+def _val(extracted: dict, key: str):
+    """Read the plain value of an extracted field.
+
+    extract_fields_from_ocr() returns a dict-of-dicts: each key maps to
+    {"value", "confidence", "bbox", "source_text"}. Persisting code must use
+    this helper — a bare extracted.get(key) returns the wrapper dict and any
+    float()/str() on it either raises TypeError (500 on every scan) or stores
+    "{'value': ...}" garbage in the products table.
+    """
+    item = extracted.get(key)
+    if not isinstance(item, dict):
+        return None
+    return item.get("value")
+
+
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_scan(
     request: Request,
@@ -200,11 +215,13 @@ async def create_scan(
         )
         db.add(ef)
 
-    # 8. Persist Violations
+    # 8. Persist Violations (with the exact rule reference so the UI can deep-link
+    # into the Rule Book — e.g. /rulebook/rule-6-1-e, not a synthetic field name)
     for v in evaluation.violations:
         viol = Violation(
             scan_id=scan_id,
             field_key=v.field,
+            rule_ref=v.rule_ref,
             severity=Severity.MAJOR if v.severity == "MAJOR" else Severity.MINOR,
             message_en=v.message_en,
             message_hi=v.message_hi,
@@ -212,31 +229,32 @@ async def create_scan(
         )
         db.add(viol)
 
-    # 9. Persist Product summary record
+    # 9. Persist Product summary record (plain values only — see _val())
     product = Product(
         scan_id=scan_id,
-        product_name=str(extracted_data.get("product_name") or "Pre-packaged Commodity"),
-        brand=str(extracted_data.get("brand") or ""),
+        product_name=str(_val(extracted_dict, "product_name") or "Pre-packaged Commodity"),
+        brand=str(_val(extracted_dict, "brand") or ""),
         category=category or "General",
-        manufacturer_name=str(extracted_data.get("manufacturer_name") or ""),
-        manufacturer_address=str(extracted_data.get("manufacturer_address") or ""),
-        pin_code=str(extracted_data.get("pin_code") or ""),
-        country_of_origin=str(extracted_data.get("country_of_origin") or ("India" if not is_imported else "")),
-        net_quantity_value=float(extracted_data.get("net_quantity_value") or 0.0),
-        net_quantity_unit=str(extracted_data.get("net_quantity_unit") or ""),
-        mrp=float(extracted_data.get("mrp") or 0.0),
-        fssai_number=str(extracted_data.get("fssai_number") or ""),
-        consumer_care_phone=str(extracted_data.get("consumer_care_phone") or ""),
-        consumer_care_email=str(extracted_data.get("consumer_care_email") or ""),
-        barcode_gtin=str(extracted_data.get("barcode_gtin") or "")
+        manufacturer_name=str(_val(extracted_dict, "manufacturer_name") or ""),
+        manufacturer_address=str(_val(extracted_dict, "manufacturer_address") or ""),
+        pin_code=str(_val(extracted_dict, "pin_code") or ""),
+        country_of_origin=str(_val(extracted_dict, "country_of_origin") or ("India" if not is_imported else "")),
+        net_quantity_value=float(_val(extracted_dict, "net_quantity_value") or 0.0),
+        net_quantity_unit=str(_val(extracted_dict, "net_quantity_unit") or ""),
+        mrp=float(_val(extracted_dict, "mrp") or 0.0),
+        fssai_number=str(_val(extracted_dict, "fssai_number") or ""),
+        consumer_care_phone=str(_val(extracted_dict, "consumer_care_phone") or ""),
+        consumer_care_email=str(_val(extracted_dict, "consumer_care_email") or ""),
+        barcode_gtin=str(_val(extracted_dict, "barcode_gtin") or "")
     )
     db.add(product)
 
-    # 10. Update Scan record
+    # 10. Update Scan record (record the OCR engine actually used, not just the configured default)
     scan.status = ScanStatus.DONE
     scan.verdict = evaluation.verdict
     scan.compliance_score = evaluation.compliance_score
     scan.avg_ocr_confidence = combined_metadata.get("avg_confidence", 0.0)
+    scan.ocr_engine = combined_metadata.get("engine") or settings.OCR_ENGINE
     scan.processing_time_ms = int((time.time() - start_time) * 1000)
 
     await db.commit()
@@ -252,8 +270,17 @@ async def create_scan(
 
 
 @router.get("/{scan_id}")
-async def get_scan_details(scan_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    """Retrieve full scan details, extracted fields, violations, and confidence distribution."""
+async def get_scan_details(
+    scan_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Retrieve full scan details, extracted fields, violations, and confidence distribution.
+
+    Authentication required: scan data is enforcement evidence and must never be
+    publicly enumerable by UUID guessing. Inspectors see their own scans;
+    SENIOR_OFFICER/ADMIN see everything.
+    """
     stmt = (
         select(Scan)
         .where(Scan.id == scan_id)
@@ -269,6 +296,10 @@ async def get_scan_details(scan_id: uuid.UUID, db: AsyncSession = Depends(get_db
 
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
+
+    # Data isolation: a scan is visible to its inspector and to senior officers/admins
+    if scan.user_id and scan.user_id != current_user.id and current_user.role.value not in ("ADMIN", "SENIOR_OFFICER"):
+        raise HTTPException(status_code=403, detail="Not authorized to view this scan")
 
     # Compute Recharts pie chart distribution per §7.2
     # Slices: High (≥90%), Medium (75–89%), Low (<75%), Not detected
@@ -335,7 +366,7 @@ async def get_scan_details(scan_id: uuid.UUID, db: AsyncSession = Depends(get_db
                 "message_en": v.message_en,
                 "message_hi": v.message_hi,
                 "suggested_fix": v.suggested_fix,
-                "rule_ref": f"rule-{v.field_key.replace('_', '-')}"
+                "rule_ref": getattr(v, "rule_ref", None) or f"rule-{v.field_key.replace('_', '-')}"
             }
             for v in scan.violations
         ],

@@ -29,6 +29,10 @@ class Violation(Base):
     rule_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID_TYPE, ForeignKey("rules.id"), nullable=True, index=True
     )
+    # Exact rule reference (e.g. 'rule-6-1-e') persisted with the violation so
+    # the UI can deep-link into the Rule Book — synthetic field-name refs made
+    # every deep link land on a 404.
+    rule_ref: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     severity: Mapped[Severity] = mapped_column(
         SAEnum(Severity, name="severity_type", create_constraint=True),
         default=Severity.MAJOR,

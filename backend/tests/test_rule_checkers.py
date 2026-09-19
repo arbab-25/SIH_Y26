@@ -4,10 +4,10 @@ Includes ≥40 independent test cases:
 - Missing MRP -> NEEDS_REVIEW
 - MRP without 'incl. of all taxes' -> NON_COMPLIANT
 - MRP non-standard rounding (e.g. ₹99.73) -> NON_COMPLIANT
-- Missing month/year of manufacture -> NON_COMPLIANT (non-food)
+- Missing month/year of manufacture -> NEEDS_REVIEW (fail-closed: not detected ≠ not declared)
 - Non-standard pack size for biscuits (e.g. 63g) -> NON_COMPLIANT
 - Standard pack size for biscuits (e.g. 100g) -> COMPLIANT
-- Imported product without country of origin -> NON_COMPLIANT
+- Imported product without country of origin -> NEEDS_REVIEW (fail-closed)
 - Imported product with country of origin -> COMPLIANT
 - Domestic product without country of origin -> COMPLIANT (optional)
 - Exempt <=10g package (e.g. 5g sachet) -> COMPLIANT (Exempt)
@@ -27,10 +27,10 @@ Includes ≥40 independent test cases:
 - Incorrect SI unit: 1500 g (should be 1.5 kg) -> NON_COMPLIANT
 - Incorrect SI unit: 0.25 L (should be 250 ml) -> NON_COMPLIANT
 - Incorrect SI unit: 2000 ml (should be 2 L) -> NON_COMPLIANT
-- Manufacturer without 6-digit PIN code -> NON_COMPLIANT
+- Manufacturer without detected 6-digit PIN code -> NEEDS_REVIEW (fail-closed); malformed PIN -> NON_COMPLIANT
 - Manufacturer with valid 6-digit PIN code -> COMPLIANT
 - Manufacturer completely missing -> NEEDS_REVIEW
-- Missing consumer care details -> NON_COMPLIANT
+- Missing consumer care details -> NEEDS_REVIEW (fail-closed: not detected ≠ not declared)
 - Consumer care with phone only -> COMPLIANT
 - Consumer care with email only -> COMPLIANT
 - Package dimensions missing -> NEEDS_REVIEW (never guess per §3!)
@@ -154,18 +154,21 @@ def test_manufacturer_missing_returns_needs_review():
     res = check_manufacturer_details(name=None, address=None, pin_code=None, confidence=0.0)
     assert res.status == Verdict.NEEDS_REVIEW
 
-def test_manufacturer_missing_pin_code_is_non_compliant():
+def test_manufacturer_missing_pin_code_fails_closed_to_needs_review():
+    # Fail-closed per §3: a PIN that was never READ is not proof it is absent —
+    # a false NON_COMPLIANT is worse than a manual review.
     res = check_manufacturer_details(
         name="Parle Products Pvt Ltd",
         address="Vile Parle East, Mumbai",
         pin_code=None,
         confidence=0.92
     )
-    assert res.status == Verdict.NON_COMPLIANT
+    assert res.status == Verdict.NEEDS_REVIEW
     assert res.rule_ref == "rule-10-1"
-    assert "PIN code" in res.message_en
+    assert "PIN" in res.message_en
 
 def test_manufacturer_invalid_pin_code_is_non_compliant():
+    # A positively-read but malformed PIN is positive evidence -> NON_COMPLIANT
     res = check_manufacturer_details(
         name="ABC Foods",
         address="Kolkata",
@@ -187,9 +190,10 @@ def test_manufacturer_with_valid_pin_code_is_compliant():
 # ----------------------------------------------------------------------
 # Rule 6(1)(aa): Country of Origin Tests
 # ----------------------------------------------------------------------
-def test_imported_package_missing_country_of_origin_is_non_compliant():
+def test_imported_package_missing_country_of_origin_fails_closed_to_needs_review():
+    # Fail-closed per §3: not detected ≠ not declared on the captured panel
     res = check_country_of_origin(country=None, is_imported=True, confidence=0.0)
-    assert res.status == Verdict.NON_COMPLIANT
+    assert res.status == Verdict.NEEDS_REVIEW
     assert res.rule_ref == "rule-6-1-aa"
 
 def test_imported_package_with_country_of_origin_is_compliant():
@@ -204,9 +208,10 @@ def test_domestic_package_without_country_of_origin_is_compliant():
 # ----------------------------------------------------------------------
 # Rule 6(1)(d): Month and Year of Manufacture Tests
 # ----------------------------------------------------------------------
-def test_mfg_date_missing_non_food_is_non_compliant():
+def test_mfg_date_missing_non_food_fails_closed_to_needs_review():
+    # Fail-closed per §3: not detected ≠ not declared (the panel may not be in frame)
     res = check_mfg_date_declaration(date_str=None, category="cosmetics", confidence=0.0)
-    assert res.status == Verdict.NON_COMPLIANT
+    assert res.status == Verdict.NEEDS_REVIEW
 
 def test_mfg_date_present_is_compliant():
     res = check_mfg_date_declaration(date_str="05/2026", category="detergent", confidence=0.95)
@@ -220,9 +225,10 @@ def test_mfg_date_food_article_with_date_is_compliant():
 # ----------------------------------------------------------------------
 # Rule 6(2): Consumer Care Details Tests
 # ----------------------------------------------------------------------
-def test_consumer_care_missing_is_non_compliant():
+def test_consumer_care_missing_fails_closed_to_needs_review():
+    # Fail-closed per §3: not detected ≠ not declared
     res = check_consumer_care_details(phone=None, email=None, confidence=0.0)
-    assert res.status == Verdict.NON_COMPLIANT
+    assert res.status == Verdict.NEEDS_REVIEW
     assert res.rule_ref == "rule-6-2"
 
 def test_consumer_care_with_phone_only_is_compliant():
