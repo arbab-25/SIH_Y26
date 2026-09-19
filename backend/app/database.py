@@ -1,11 +1,19 @@
 """SQLAlchemy async engine and session factory."""
 
+import ssl
+
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 from app.config import settings
 
 
 is_sqlite = settings.DATABASE_URL.startswith("sqlite")
+
+# "require" semantics: encrypt the connection without certificate verification
+# (works for Neon, Render Postgres, and self-signed internal endpoints alike).
+_ssl_ctx = ssl.create_default_context()
+_ssl_ctx.check_hostname = False
+_ssl_ctx.verify_mode = ssl.CERT_NONE
 
 engine_kwargs = {"echo": settings.DEBUG}
 if not is_sqlite:
@@ -15,9 +23,10 @@ if not is_sqlite:
         "max_overflow": 10,
     })
     # Managed Postgres (Neon/Render) requires TLS. asyncpg does not accept the
-    # libpq 'sslmode' URL parameter, so SSL is configured explicitly here.
+    # libpq 'sslmode' URL parameter, so SSL is configured explicitly here with
+    # a real SSLContext (deterministic across driver versions).
     if "localhost" not in settings.DATABASE_URL and "127.0.0.1" not in settings.DATABASE_URL:
-        engine_kwargs["connect_args"] = {"ssl": "require"}
+        engine_kwargs["connect_args"] = {"ssl": _ssl_ctx}
     else:
         engine_kwargs["connect_args"] = {"ssl": False}
 

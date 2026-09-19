@@ -32,8 +32,11 @@ case "${DATABASE_URL_SYNC}" in
 esac
 
 echo "==> Waiting for database to accept connections..."
+DB_READY=0
+DB_LAST_ERROR=""
+set +e
 for i in $(seq 1 30); do
-  if python -c "
+  DB_LAST_ERROR=$(python -c "
 import os, sys
 try:
     import sqlalchemy
@@ -41,16 +44,27 @@ try:
     eng = sqlalchemy.create_engine(url, connect_args={'sslmode': 'require'} if 'sslmode' not in url and 'localhost' not in url and '127.0.0.1' not in url else {})
     with eng.connect() as c:
         c.exec_driver_sql('SELECT 1')
+    sys.exit(0)
 except Exception as e:
+    print(f'{type(e).__name__}: {e}', file=sys.stderr)
     sys.exit(1)
-sys.exit(0)
-" 2>/dev/null; then
+" 2>&1)
+  if [ $? -eq 0 ]; then
     echo "Database is ready."
+    DB_READY=1
     break
   fi
-  echo "  Database not ready yet (attempt $i/30), retrying in 2s..."
+  echo "  Database not ready yet (attempt $i/30). Error: $DB_LAST_ERROR"
   sleep 2
 done
+set -e
+
+if [ "$DB_READY" -ne 1 ]; then
+  echo "ERROR: Database never became reachable. Last error: $DB_LAST_ERROR"
+  echo "HINT: verify DATABASE_URL / DATABASE_URL_SYNC point at the live Neon host,"
+  echo "      and that the Neon branch is not suspended or deleted."
+  exit 1
+fi
 
 echo "==> Running Alembic migrations..."
 alembic upgrade head
