@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Camera, UploadCloud, AlertCircle, RefreshCw, Layers, CheckCircle2, FileImage, Sparkles } from 'lucide-react';
+import { Camera, UploadCloud, AlertCircle, RefreshCw, Layers, CheckCircle2, FileImage, Sparkles, X } from 'lucide-react';
 import { api } from '../utils/api';
 import { queueOfflineScan } from '../utils/offlineQueue';
 import { translations } from '../i18n/translations';
@@ -28,6 +28,67 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({ onScanComplete, lang, on
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  
+  // Webcam states
+  const [showWebcam, setShowWebcam] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [stream, setStream] = useState<MediaStream | null>(null);
+
+  const startWebcam = async () => {
+    setErrorMessage(null);
+    try {
+      const mediaStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' }
+      });
+      setStream(mediaStream);
+      setShowWebcam(true);
+    } catch (err: any) {
+      console.warn("Environment camera failed, falling back to default", err);
+      try {
+        const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        setStream(fallbackStream);
+        setShowWebcam(true);
+      } catch (err2: any) {
+        console.warn("Camera access denied or unavailable", err2);
+        // Fallback to standard input
+        cameraInputRef.current?.click();
+      }
+    }
+  };
+
+  const stopWebcam = () => {
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+      setStream(null);
+    }
+    setShowWebcam(false);
+  };
+
+  const captureFrame = () => {
+    if (videoRef.current) {
+      const canvas = document.createElement('canvas');
+      canvas.width = videoRef.current.videoWidth;
+      canvas.height = videoRef.current.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx?.drawImage(videoRef.current, 0, 0);
+      canvas.toBlob((blob) => {
+        if (blob) {
+          const file = new File([blob], `capture_${Date.now()}.jpg`, { type: 'image/jpeg' });
+          const dt = new DataTransfer();
+          dt.items.add(file);
+          handleFilesChosen(dt.files);
+          stopWebcam();
+        }
+      }, 'image/jpeg', 0.85);
+    }
+  };
+
+  React.useEffect(() => {
+    if (showWebcam && videoRef.current && stream) {
+      videoRef.current.srcObject = stream;
+      videoRef.current.play().catch(e => console.error("Video play failed", e));
+    }
+  }, [showWebcam, stream]);
 
   // Client-side image compression to max 1600px per §7.1
   const compressImage = (file: File): Promise<File> => {
@@ -245,7 +306,7 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({ onScanComplete, lang, on
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* 1. Camera Capture Button */}
         <div
-          onClick={() => cameraInputRef.current?.click()}
+          onClick={startWebcam}
           className="bg-white hover:bg-slate-50 border-2 border-dashed border-[#0E7490]/40 hover:border-[#0E7490] rounded-2xl p-8 flex flex-col items-center justify-center cursor-pointer transition-all group min-h-[220px] shadow-sm"
         >
           <input
@@ -439,6 +500,35 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({ onScanComplete, lang, on
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Webcam Modal */}
+      {showWebcam && (
+        <div className="fixed inset-0 z-50 bg-black/90 flex flex-col items-center justify-center p-4">
+          <div className="relative w-full max-w-2xl bg-black rounded-2xl overflow-hidden shadow-2xl">
+            <video 
+              ref={videoRef} 
+              autoPlay 
+              playsInline 
+              className="w-full h-auto max-h-[70vh] object-contain"
+            />
+            {/* Guide overlay */}
+            <div className="absolute inset-0 border-4 border-dashed border-white/30 m-8 rounded-xl pointer-events-none"></div>
+            <button 
+              onClick={stopWebcam}
+              className="absolute top-4 right-4 bg-black/50 hover:bg-rose-500 text-white rounded-full p-2 transition-colors"
+            >
+              <X size={24} />
+            </button>
+            <div className="absolute bottom-6 left-0 right-0 flex justify-center">
+              <button 
+                onClick={captureFrame}
+                className="h-16 w-16 bg-white rounded-full border-4 border-slate-300 shadow-xl hover:bg-slate-100 transition-colors focus:ring-4 focus:ring-cyan-500 outline-none"
+              ></button>
+            </div>
+          </div>
+          <p className="text-white text-sm font-bold mt-4">Align the label inside the frame and tap to capture</p>
         </div>
       )}
     </div>
