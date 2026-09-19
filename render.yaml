@@ -7,8 +7,8 @@ services:
   - name: codemaze-api
     type: web
     runtime: docker
-    dockerfilePath: ./backend/Dockerfile
-    dockerContext: ./backend
+    rootDir: ./backend
+    dockerfilePath: ./Dockerfile
     plan: free
     healthCheckPath: /api/v1/health
     envVars:
@@ -50,7 +50,7 @@ services:
     type: web
     runtime: static
     buildCommand: npm install && npm run build
-    staticPublishPath: ./frontend/dist
+    staticPublishPath: ./dist
     rootDir: ./frontend
     plan: free
     routes:
