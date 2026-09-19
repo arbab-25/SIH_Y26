@@ -3,6 +3,15 @@
 # Runs DB migrations, seeds data, then starts the API server
 set -e
 
+# The runtime needs both URLs; derive one from the other if only one is set.
+# (The config validators strip libpq 'sslmode' and switch dialects as needed.)
+if [ -z "${DATABASE_URL:-}" ] && [ -n "${DATABASE_URL_SYNC:-}" ]; then
+  export DATABASE_URL="$DATABASE_URL_SYNC"
+fi
+if [ -z "${DATABASE_URL_SYNC:-}" ] && [ -n "${DATABASE_URL:-}" ]; then
+  export DATABASE_URL_SYNC="$DATABASE_URL"
+fi
+
 if [ -z "${DATABASE_URL:-}" ] || [ -z "${DATABASE_URL_SYNC:-}" ]; then
   echo "ERROR: DATABASE_URL and DATABASE_URL_SYNC must be configured as Render secret environment variables."
   exit 1

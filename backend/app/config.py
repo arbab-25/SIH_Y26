@@ -45,8 +45,11 @@ class Settings(BaseSettings):
     OCR_CONFIDENCE_THRESHOLD: float = 0.75
     OCR_ENGINE: str = "tesseract"  # "tesseract" or "paddleocr"
 
-    # CORS
-    CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
+    # CORS – defaults include the deployed frontend so a missing env var can never lock out users
+    CORS_ORIGINS: str = (
+        "http://localhost:5173,http://localhost:3000,"
+        "https://codemaze-frontend-m6f0.onrender.com"
+    )
 
     # App
     APP_NAME: str = "CODE MAZE"
