@@ -149,17 +149,52 @@ async def create_scan(
     )
 
     # 7. Persist Extracted Fields
+    # Map extractor field keys -> rule-engine check field names. The engine emits
+    # its own check-level names (e.g. 'manufacturer', 'net_quantity'); without this
+    # mapping almost no extracted field ever received its engine status and every
+    # scan showed constant NEEDS_REVIEW across the board.
+    ENGINE_FIELD_ALIASES = {
+        "manufacturer_name": "manufacturer",
+        "manufacturer_address": "manufacturer",
+        "pin_code": "manufacturer",
+        "net_quantity_value": "net_quantity",
+        "net_quantity_unit": "net_quantity",
+        "vague_quantity_found": "net_quantity_qualifiers",
+        "mrp": "mrp",
+        "mrp_inclusive_taxes": "mrp",
+        "mfg_date_str": "mfg_date",
+        "fssai_number": "fssai_license",
+        "ingredients_declared": "ingredients_list",
+        "nutritional_info_declared": "nutritional_information",
+        "country_of_origin": "country_of_origin",
+    }
+    # Fields that are display/context only — they carry no statutory check of
+    # their own, so a clean read is simply COMPLIANT, never NEEDS_REVIEW.
+    DISPLAY_ONLY_FIELDS = {"brand", "product_name", "best_before", "mrp_detected_text", "barcode_gtin"}
+
     for key, item in extracted_dict.items():
-        # Determine status from evaluation results
-        matching_res = next((r for r in evaluation.results if r.field == key), None)
-        f_status = matching_res.status if matching_res else (
-            Verdict.COMPLIANT if item.get("confidence", 0) >= 75 else Verdict.NEEDS_REVIEW
-        )
+        engine_field = ENGINE_FIELD_ALIASES.get(key)
+        matching_res = next((r for r in evaluation.results if r.field == engine_field), None) if engine_field else None
+        conf_pct = float(item.get("confidence", 0) or 0)
+        if conf_pct <= 1.0:
+            conf_pct *= 100.0
+        if matching_res is not None:
+            # The engine may have checked a sibling field that wasn't extracted
+            # (e.g. the manufacturer check with no name line read) — only adopt
+            # its verdict when the engine actually saw a value, otherwise fall
+            # through to the confidence-based default below.
+            f_status = matching_res.status
+        elif key in DISPLAY_ONLY_FIELDS or conf_pct >= 75:
+            # Clean high-confidence read with no adverse engine finding ->
+            # informational COMPLIANT, never a constant NEEDS_REVIEW flag.
+            f_status = Verdict.COMPLIANT
+        else:
+            f_status = Verdict.NEEDS_REVIEW
         ef = ExtractedField(
             scan_id=scan_id,
             field_key=key,
             field_value=str(item.get("value", "")),
-            confidence=item.get("confidence", 0.0),
+            confidence=float(item.get("confidence", 0.0) or 0) * 100 if float(item.get("confidence", 1.0) or 0) <= 1.0 else float(item.get("confidence", 0.0)),
             bbox=item.get("bbox"),
             status=f_status
         )

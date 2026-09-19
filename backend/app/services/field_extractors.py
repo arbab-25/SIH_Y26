@@ -42,6 +42,89 @@ class ExtractedData:
         return self.fields
 
 
+def _rebuild_display_lines(items: List[Any], fallback_lines: List[str]) -> List[str]:
+    """Reconstruct visual text lines from OCR items.
+
+    OCR engines often emit word-level items. Joining raw item texts with newlines
+    breaks every line-aware regex (e.g. 'Best Before: 6 months' becomes
+    'Best\\nBefore:\\n6'). Group items into lines by vertical box overlap when
+    bboxes are available; otherwise fall back to the provided raw lines.
+    """
+    boxed = [it for it in items if getattr(it, "bbox", None) and len(it.bbox) >= 4]
+
+    def _bbox_sig(b) -> tuple:
+        """Flatten any bbox shape (flat [x,y,w,h] or polygon [[x,y],...]) into
+        a hashable float signature."""
+        try:
+            out: List[float] = []
+            stack = list(b)
+            while stack:
+                v = stack.pop(0)
+                if isinstance(v, (int, float)):
+                    out.append(float(v))
+                else:
+                    stack = list(v) + stack
+            return tuple(out)
+        except (TypeError, ValueError):
+            return ()
+
+    sigs = {_bbox_sig(it.bbox) for it in boxed}
+    # Degenerate case: no geometry at all, or every item shares the same bbox
+    # (word-level test mocks). Merge the words into ONE space-joined line so
+    # sentence-level regexes still see 'Best Before: 6 months from packaging'
+    # instead of 'Best\nBefore:\n6'.
+    if not boxed or (sigs != {()} and len(sigs) < max(2, len(boxed) // 3)):
+        merged = " ".join((it.text or "").strip() for it in items if (it.text or "").strip())
+        if merged and not full_multiline_source(fallback_lines):
+            return [merged]
+        return fallback_lines or ([merged] if merged else [])
+    if len(boxed) < 2:
+        return fallback_lines or [it.text for it in items]
+
+    def _bbox_y_h(b) -> tuple:
+        """Return (top_y, height) for any bbox shape: flat [x,y,w,h] or
+        polygon [[x,y],...]. Used only for line grouping, so approximations
+        are acceptable."""
+        try:
+            flat: List[float] = []
+            stack = list(b)
+            while stack:
+                v = stack.pop(0)
+                if isinstance(v, (int, float)):
+                    flat.append(float(v))
+                else:
+                    stack = list(v) + stack
+            if len(flat) >= 8:  # polygon: x1,y1,x2,y2,...
+                ys = flat[1::2]
+                return min(ys), max(ys) - min(ys)
+            if len(flat) >= 4:  # flat [x, y, w, h]
+                return flat[1], flat[3]
+        except (TypeError, ValueError):
+            pass
+        return 0.0, 0.0
+
+    sorted_items = sorted(boxed, key=lambda it: _bbox_y_h(it.bbox)[0])
+    lines_out: List[str] = []
+    current: List[str] = []
+    current_y = None
+    for it in sorted_items:
+        y, h = _bbox_y_h(it.bbox)
+        if current_y is not None and abs(y - current_y) > max(10.0, float(h) * 0.7):
+            lines_out.append(" ".join(current))
+            current = []
+        current.append(it.text)
+        current_y = y
+    if current:
+        lines_out.append(" ".join(current))
+    lines_out = [l.strip() for l in lines_out if l and l.strip()]
+    return lines_out or fallback_lines or [it.text for it in items]
+
+
+def full_multiline_source(lines: List[str]) -> bool:
+    """True when the fallback lines already look like real multi-word lines."""
+    return any(len(l.split()) >= 3 for l in lines)
+
+
 def extract_fields_from_ocr(items: List[Any], full_text: Optional[str] = None) -> ExtractedData:
     """Extract structured product declarations from OCR items."""
     data = ExtractedData()
@@ -49,7 +132,9 @@ def extract_fields_from_ocr(items: List[Any], full_text: Optional[str] = None) -
     if not items:
         return data
 
-    text_lines = [item.text for item in items]
+    # Rebuild visual lines first — every downstream regex depends on sane lines.
+    raw_lines = [item.text for item in items]
+    text_lines = _rebuild_display_lines(items, raw_lines)
     combined_text = full_text if full_text else "\n".join(text_lines)
 
     # ----------------------------------------------------
@@ -77,14 +162,17 @@ def extract_fields_from_ocr(items: List[Any], full_text: Optional[str] = None) -
     mfg_found = False
     for i, line in enumerate(text_lines):
         line_lower = line.lower()
-        if any(kw in line_lower for kw in mfg_keywords):
+        matched_kw = next((kw for kw in mfg_keywords if kw in line_lower), None)
+        if matched_kw:
             mfg_found = True
             mfg_header_item = items[i]
-            # Next lines are likely manufacturer name and address
-            subsequent = text_lines[i+1:i+5]
-            mfg_name = text_lines[i+1] if i + 1 < len(text_lines) else line
-            address_lines = text_lines[i+2:i+5] if i + 2 < len(text_lines) else []
-            full_address = ", ".join(address_lines) if address_lines else mfg_name
+            # Name = text after the keyword on the same line ("Marketed by: ACME Ltd")
+            # else the following line; cap length to avoid swallowing the page.
+            after_kw = line[re.search(re.escape(matched_kw), line_lower).end():].strip(" :,-")
+            mfg_name = after_kw or (text_lines[i + 1] if i + 1 < len(text_lines) else line)
+            mfg_name = mfg_name.strip()[:120]
+            address_lines = text_lines[i + 2:i + 5] if i + 2 < len(text_lines) else []
+            full_address = (", ".join(address_lines) if address_lines else mfg_name)[:200]
 
             data.set_field("manufacturer_name", mfg_name, mfg_header_item.confidence, mfg_header_item.bbox, line)
             if full_address:
@@ -184,14 +272,33 @@ def extract_fields_from_ocr(items: List[Any], full_text: Optional[str] = None) -
         data.set_field("mfg_date_str", raw_date, item_date.confidence, item_date.bbox, item_date.text)
 
     # Best before / use by date (Rule 6(1)(da))
+    # Terminators: line end or the start of the next declaration, so merged
+    # single-line OCR text never leaks neighbouring declarations into the value.
     bb_regex = re.compile(
-        r"(?:best\s*before|use\s*by|expiry|exp\.?)\s*[:\-.]?\s*([a-zA-Z0-9\s\/\.-]{3,25})",
+        r"(?:best\s*before|use\s*by|expiry|exp\.?)\s*[:\-.]?\s*"
+        r"(.+?)(?=\n|$|,|;|\bb(?:est)?\s*before\b|\buse\s*by\b|\bmfd\b|\bmfg\b|\bmrp\b|\bnet\b|\bbatch\b|\blot\b|\bmarketed\b|\bmanufactured\b|\bfssai\b)",
         re.IGNORECASE
     )
     bb_match = bb_regex.search(combined_text)
     if bb_match:
-        bb_text = bb_match.group(1).strip()
-        item_bb = next((it for it in items if "best before" in it.text.lower() or "use by" in it.text.lower() or "exp" in it.text.lower()), items[0])
+        # Stop at line/segment boundaries and strip page-junk so we never store
+        # values like "6 monthsfrom packaging\nMa" from adjacent OCR lines.
+        bb_text = bb_match.group(1).strip().split("\n")[0].strip(" \t.,;:-")
+        # Walk forward in the combined text to grab the remainder of this line
+        # (e.g. "6 months from packaging") that the bounded regex may cut off.
+        tail_start = bb_match.end(1)
+        next_nl = combined_text.find("\n", tail_start)
+        if next_nl == -1:
+            next_nl = len(combined_text)
+        extra = combined_text[tail_start:next_nl].strip()
+        if extra and re.match(r"^[a-zA-Z0-9 ,./-]+$", extra) and len(extra) <= 30:
+            bb_text = (bb_text + " " + extra).strip()
+        # Prefer a matching OCR item on the SAME line as the matched text
+        bb_first_word = bb_text.split()[0] if bb_text.split() else ""
+        item_bb = next(
+            (it for it in items if bb_first_word and bb_first_word.lower() in it.text.lower()),
+            items[0]
+        )
         data.set_field("best_before", bb_text, item_bb.confidence, item_bb.bbox, item_bb.text)
 
     # ----------------------------------------------------
@@ -211,12 +318,38 @@ def extract_fields_from_ocr(items: List[Any], full_text: Optional[str] = None) -
     # 8. Brand & Product / Generic Name (Rule 6(1)(b))
     # ----------------------------------------------------
     if len(items) > 0:
-        # First prominent header is usually brand/product name
-        brand_item = items[0]
-        data.set_field("brand", brand_item.text, brand_item.confidence, brand_item.bbox, brand_item.text)
-        if len(items) > 1:
-            product_name = f"{items[0].text} {items[1].text}"
-            data.set_field("product_name", product_name, min(items[0].confidence, items[1].confidence), items[0].bbox, product_name)
+        # text_lines are already rebuilt visual lines (see top of function).
+        header_line = text_lines[0].strip() if text_lines else ""
+        # Brand = first line of the label header; product name = header + second
+        # line when the second line looks like a product descriptor (not a stat).
+        second = text_lines[1].strip() if len(text_lines) > 1 else ""
+        looks_like_descriptor = bool(second) and not re.match(
+            r"^(net|max|mrp|mfd|mfg|pkd|best|use|batch|lot|marketed|manufactured|country)\b",
+            second,
+            re.IGNORECASE,
+        )
+        product_name = f"{header_line} {second}" if looks_like_descriptor and second else header_line
+
+        def _cut_header(line: str, limit: int = 6) -> str:
+            """Safety cut: a header that swallowed neighbouring declarations
+            (degenerate line grouping) is trimmed at the first declaration
+            keyword and capped to a few words."""
+            cut = re.split(
+                r"\b(net\s*qty|net\b|max\.?\s*retail|mrp|mfd\.?|mfg\.?|pkd|best\s*before|use\s*by|batch|lot|marketed|manufactured|country\s*of|fssai|ingredients)\b",
+                line,
+                maxsplit=1,
+                flags=re.IGNORECASE,
+            )[0].strip(" :\-.,")
+            words = cut.split()
+            return " ".join(words[:limit]) if len(words) > limit else cut
+        # Attach the confidence of the OCR item(s) that formed the header
+        header_words = header_line.split()[:2]
+        header_items = [it for it in items if any(w and w.lower() in (it.text or "").lower() for w in header_words)]
+        hdr_conf = max((it.confidence for it in header_items), default=items[0].confidence)
+        brand_name = _cut_header(header_line)
+        product_cut = _cut_header(product_name)
+        data.set_field("brand", brand_name or "", hdr_conf if brand_name else 0.0, items[0].bbox, header_line)
+        data.set_field("product_name", product_cut or "", hdr_conf if product_cut else 0.0, items[0].bbox, header_line)
 
     # ----------------------------------------------------
     # 9. Ingredients & Nutritional Facts (FSSAI / Food articles)
