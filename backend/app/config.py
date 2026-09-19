@@ -6,6 +6,12 @@ from pydantic_settings import BaseSettings
 from typing import Optional
 import os
 
+# libpq-only query params that managed-Postgres providers (Neon/Render/Supabase)
+# append to connection strings. asyncpg rejects them with
+# "TypeError: connect() got an unexpected keyword argument ...".
+# Neon's copy-string ships at least: sslmode=require & channel_binding=require.
+LIBPQ_ONLY_PARAMS = ("sslmode", "channel_binding", "gssencmode")
+
 
 class Settings(BaseSettings):
     """All configuration is loaded from environment variables or .env file."""
@@ -84,25 +90,45 @@ class Settings(BaseSettings):
             )
         return url
 
+    # libpq-only query params that managed-Postgres providers (Neon/Render/Supabase)
+    # append to connection strings. asyncpg rejects them with
+    # "TypeError: connect() got an unexpected keyword argument ...".
+    # Neon's copy-string ships at least: sslmode=require & channel_binding=require.
+    # (Parameter list lives in module-level LIBPQ_ONLY_PARAMS.)
+
     @field_validator("DATABASE_URL", mode="after")
     @classmethod
     def use_asyncpg_for_runtime(cls, url: str) -> str:
         """Neon emits postgresql:// URLs; FastAPI needs SQLAlchemy's asyncpg dialect.
 
-        asyncpg rejects the libpq-style 'sslmode' query parameter (this broke every
-        Neon/Render deployment with: connect() got an unexpected keyword argument
-        'sslmode'), so we strip it here and force SSL in database.py for remote hosts.
+        asyncpg rejects libpq-style query parameters (this broke every Neon/Render
+        deployment with: connect() got an unexpected keyword argument), so they are
+        stripped here and TLS is forced in database.py for remote hosts.
         """
-        url = re.sub(r"([?&])sslmode=[^&]+", lambda m: "?" if m.group(1) == "?" else "", url).rstrip("?")
         if url.startswith("postgresql://"):
             url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
-        return url
+        return cls._strip_libpq_params(url)
 
     @field_validator("DATABASE_URL_SYNC", mode="after")
     @classmethod
-    def strip_sslmode_sync(cls, url: str) -> str:
-        """Strip libpq sslmode from the Alembic sync URL (pg8000 rejects it too)."""
-        return re.sub(r"([?&])sslmode=[^&]+", lambda m: "?" if m.group(1) == "?" else "", url).rstrip("?")
+    def strip_libpq_extras_sync(cls, url: str) -> str:
+        """Strip libpq-only extras from the Alembic sync URL (harmless for pg8000/psycopg2)."""
+        return cls._strip_libpq_params(url)
+
+    @classmethod
+    def _strip_libpq_params(cls, url: str) -> str:
+        """Remove libpq-only query params from a connection URL (query-aware)."""
+        if "?" not in url:
+            return url
+        from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+        parts = urlsplit(url)
+        kept = [
+            (k, v)
+            for k, v in parse_qsl(parts.query, keep_blank_values=True)
+            if k.lower() not in LIBPQ_ONLY_PARAMS
+        ]
+        query = urlencode(kept)
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
 
     @property
     def cors_origins_list(self) -> list[str]:
