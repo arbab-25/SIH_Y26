@@ -7,6 +7,7 @@ interface LoginModalProps {
   isOpen: boolean;
   onClose: () => void;
   onLoginSuccess: (user: any) => void;
+  notice?: string | null;
   lang: 'en' | 'hi';
 }
 
@@ -16,6 +17,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   isOpen,
   onClose,
   onLoginSuccess,
+  notice,
   lang,
 }) => {
   const t = translations[lang];
@@ -25,17 +27,14 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
 
-  // --- Register state ---
+  // --- Register state (compact: name, email/mobile, designation, area) ---
   const [regName, setRegName] = useState('');
   const [regEmail, setRegEmail] = useState('');
   const [regMobile, setRegMobile] = useState('');
   const [regPassword, setRegPassword] = useState('');
   const [regConfirmPwd, setRegConfirmPwd] = useState('');
-  const [regRole, setRegRole] = useState('INSPECTOR');
   const [regDesignation, setRegDesignation] = useState('');
-  const [regOffice, setRegOffice] = useState('');
-  const [regDistrict, setRegDistrict] = useState('');
-  const [regState, setRegState] = useState('');
+  const [regArea, setRegArea] = useState('');
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -110,14 +109,17 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       const payload: Record<string, any> = {
         name: regName.trim(),
         password: regPassword,
-        role: regRole,
+        role: 'INSPECTOR',
       };
       if (regEmail) payload.email = regEmail.trim();
       if (regMobile) payload.mobile = regMobile.trim();
       if (regDesignation) payload.designation = regDesignation.trim();
-      if (regOffice) payload.office = regOffice.trim();
-      if (regDistrict) payload.district = regDistrict.trim();
-      if (regState) payload.state = regState.trim();
+      // Single compact 'Area' field feeds office/district/state
+      if (regArea) {
+        payload.office = regArea.trim();
+        payload.district = regArea.trim();
+        payload.state = regArea.trim();
+      }
 
       const res = await api.post('/auth/register', payload);
 
@@ -192,6 +194,14 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
         {/* Scrollable Body */}
         <div className="overflow-y-auto flex-1">
+          {/* Contextual notice (e.g. guest limit / report sign-in prompt) */}
+          {notice && !error && !successMsg && (
+            <div className="mx-5 mt-4 flex items-start gap-2.5 p-3.5 border rounded-xl text-xs bg-cyan-50 border-cyan-200 text-cyan-900">
+              <Shield size={16} className="text-[#0E7490] shrink-0 mt-0.5" />
+              <span>{notice}</span>
+            </div>
+          )}
+
           {/* Error / Success */}
           {(error || successMsg) && (
             <div className={`mx-5 mt-4 flex items-start gap-2.5 p-3.5 border rounded-xl text-xs ${
@@ -335,25 +345,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 </div>
               </div>
 
-              {/* Role */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                  {lang === 'hi' ? 'भूमिका *' : 'Role *'}
-                </label>
-                <div className="relative">
-                  <Briefcase size={15} className="absolute left-3 top-3 text-slate-400" />
-                  <select
-                    value={regRole}
-                    onChange={(e) => setRegRole(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:bg-white focus:border-[#0E7490] outline-none min-h-[44px] appearance-none"
-                  >
-                    <option value="INSPECTOR">{lang === 'hi' ? 'निरीक्षक (Inspector)' : 'Inspector'}</option>
-                    <option value="SENIOR_OFFICER">{lang === 'hi' ? 'वरिष्ठ अधिकारी (Senior Officer)' : 'Senior Officer'}</option>
-                    <option value="ADMIN">{lang === 'hi' ? 'प्रशासक (Admin)' : 'Admin'}</option>
-                  </select>
-                </div>
-              </div>
-
               {/* Designation */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
@@ -371,46 +362,18 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 </div>
               </div>
 
-              {/* Office + District (side by side) */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    {lang === 'hi' ? 'कार्यालय' : 'Office'}
-                  </label>
-                  <input
-                    type="text"
-                    value={regOffice}
-                    onChange={(e) => setRegOffice(e.target.value)}
-                    placeholder={lang === 'hi' ? 'जिला कार्यालय' : 'District Office'}
-                    className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:bg-white focus:border-[#0E7490] outline-none min-h-[44px]"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    {lang === 'hi' ? 'जिला' : 'District'}
-                  </label>
-                  <input
-                    type="text"
-                    value={regDistrict}
-                    onChange={(e) => setRegDistrict(e.target.value)}
-                    placeholder={lang === 'hi' ? 'जिले का नाम' : 'District name'}
-                    className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:bg-white focus:border-[#0E7490] outline-none min-h-[44px]"
-                  />
-                </div>
-              </div>
-
-              {/* State */}
+              {/* Area (single compact field) */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                  {lang === 'hi' ? 'राज्य' : 'State'}
+                  {lang === 'hi' ? 'क्षेत्र / एरिया' : 'Area'}
                 </label>
                 <div className="relative">
                   <MapPin size={15} className="absolute left-3 top-3 text-slate-400" />
                   <input
                     type="text"
-                    value={regState}
-                    onChange={(e) => setRegState(e.target.value)}
-                    placeholder={lang === 'hi' ? 'महाराष्ट्र' : 'Maharashtra'}
+                    value={regArea}
+                    onChange={(e) => setRegArea(e.target.value)}
+                    placeholder={lang === 'hi' ? 'जिला / कार्यालय क्षेत्र' : 'District / office area'}
                     className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:bg-white focus:border-[#0E7490] outline-none min-h-[44px]"
                   />
                 </div>

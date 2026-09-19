@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { MobileTabBar } from './components/MobileTabBar';
@@ -12,9 +12,11 @@ import { RuleBook } from './pages/RuleBook';
 import { ReportHistory } from './pages/ReportHistory';
 import { ScanHistory } from './pages/ScanHistory';
 import { Dashboard } from './pages/Dashboard';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { ScanResult, User } from './types';
 import { api } from './utils/api';
 import { getPendingScansCount } from './utils/offlineQueue';
+import { translations } from './i18n/translations';
 
 export function App() {
   const [activeTab, setActiveTab] = useState<string>('scan');
@@ -24,6 +26,7 @@ export function App() {
 
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loginModalOpen, setLoginModalOpen] = useState<boolean>(false);
+  const [loginNotice, setLoginNotice] = useState<string | null>(null);
   const [helpDrawerOpen, setHelpDrawerOpen] = useState<boolean>(false);
   const [guidedTourOpen, setGuidedTourOpen] = useState<boolean>(false);
   const [pendingSyncCount, setPendingSyncCount] = useState<number>(0);
@@ -31,6 +34,18 @@ export function App() {
   // Latest Scan Data
   const [currentScan, setCurrentScan] = useState<ScanResult | null>(null);
   const [ruleDeepLink, setRuleDeepLink] = useState<string | null>(null);
+
+  const t = translations[lang];
+
+  // Guest free-scan tracking: sign-in becomes compulsory after the 3rd scan per §6
+  const getGuestScanCount = useCallback((): number => {
+    return parseInt(localStorage.getItem('cmd_guest_scans') || '0', 10) || 0;
+  }, []);
+
+  const openLogin = useCallback((notice?: string) => {
+    setLoginNotice(notice || null);
+    setLoginModalOpen(true);
+  }, []);
 
   // Check initial user authentication
   useEffect(() => {
@@ -47,13 +62,13 @@ export function App() {
     // Check offline sync queue
     getPendingScansCount().then(setPendingSyncCount);
 
-    // Listen for guest free scan limit trigger per §6
+    // Listen for guest free scan limit trigger per §6 (backend 403)
     const handleTriggerLogin = () => {
-      setLoginModalOpen(true);
+      openLogin(t.guestLimitReached);
     };
     window.addEventListener('cmd_trigger_login', handleTriggerLogin);
     return () => window.removeEventListener('cmd_trigger_login', handleTriggerLogin);
-  }, []);
+  }, [getPendingScansCount, openLogin, t.guestLimitReached]);
 
   const handleToggleLang = () => {
     const next = lang === 'en' ? 'hi' : 'en';
@@ -68,13 +83,19 @@ export function App() {
 
   const handleScanCompleted = (result: ScanResult) => {
     setCurrentScan(result);
-    setActiveTab('summary');
+    if (!currentUser) {
+      localStorage.setItem('cmd_guest_scans', String(getGuestScanCount() + 1));
+    }
+    // Compact summary now appears directly below the Scan / Upload page after each scan
+    setActiveTab('scan');
   };
 
   const handleNavigateToRule = (ruleRef: string) => {
     setRuleDeepLink(ruleRef);
     setActiveTab('rulebook');
   };
+
+  const guestScanCount = getGuestScanCount();
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-[#172033] flex flex-col font-sans">
@@ -83,7 +104,8 @@ export function App() {
         lang={lang}
         onToggleLang={handleToggleLang}
         currentUser={currentUser}
-        onOpenLogin={() => setLoginModalOpen(true)}
+        guestScanCount={guestScanCount}
+        onOpenLogin={() => openLogin()}
         onLogout={handleLogout}
         onOpenHelp={() => setHelpDrawerOpen(true)}
         pendingSyncCount={pendingSyncCount}
@@ -96,34 +118,34 @@ export function App() {
         {/* Scrollable Content Viewport */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto pb-20 md:pb-8">
           {activeTab === 'scan' && (
-            <ScanUpload
-              onScanComplete={handleScanCompleted}
-              lang={lang}
-              onOfflineQueued={() => getPendingScansCount().then(setPendingSyncCount)}
-            />
-          )}
-
-          {activeTab === 'summary' && (
-            currentScan ? (
-              <ScanSummary
-                scan={currentScan}
-                onViewDetailedAnalysis={() => setActiveTab('analysis')}
+            <div className="space-y-6">
+              <ScanUpload
+                onScanComplete={handleScanCompleted}
                 lang={lang}
+                currentUser={currentUser}
+                guestScanCount={guestScanCount}
+                onRequireLogin={(notice) => openLogin(notice)}
+                onOfflineQueued={() => getPendingScansCount().then(setPendingSyncCount)}
               />
-            ) : (
-              <div className="bg-white rounded-2xl p-12 text-center border border-slate-200 max-w-xl mx-auto">
-                <h3 className="text-base font-bold text-[#12355B] mb-2">No Active Label Scan</h3>
-                <p className="text-xs text-slate-500 mb-6">
-                  Please capture or upload a product packaging label to view compliance summary.
-                </p>
-                <button
-                  onClick={() => setActiveTab('scan')}
-                  className="px-5 py-2.5 bg-[#12355B] text-white rounded-xl text-xs font-bold shadow"
-                >
-                  Go to Scan / Upload
-                </button>
-              </div>
-            )
+
+              {/* Compact summary rendered below the scan workspace after every scan */}
+              {currentScan && (
+                <ScanSummary
+                  scan={currentScan}
+                  compact
+                  onViewDetailedAnalysis={() => setActiveTab('analysis')}
+                  currentUser={currentUser}
+                  onRequireLogin={() =>
+                    openLogin(
+                      lang === 'hi'
+                        ? 'रिपोर्ट भेजने के लिए कृपया साइन इन करें।'
+                        : 'Please sign in to send a compliance report.'
+                    )
+                  }
+                  lang={lang}
+                />
+              )}
+            </div>
           )}
 
           {activeTab === 'analysis' && (
@@ -158,7 +180,7 @@ export function App() {
             <ReportHistory
               onViewReport={(_repNum) => {
                 // Navigate to view report
-                setActiveTab('summary');
+                setActiveTab('analysis');
               }}
               lang={lang}
             />
@@ -168,7 +190,7 @@ export function App() {
             <ScanHistory
               onSelectScan={(s) => {
                 setCurrentScan(s);
-                setActiveTab('summary');
+                setActiveTab('analysis');
               }}
               lang={lang}
             />
@@ -184,8 +206,12 @@ export function App() {
       {/* Global Modals & Drawers */}
       <LoginModal
         isOpen={loginModalOpen}
-        onClose={() => setLoginModalOpen(false)}
+        onClose={() => {
+          setLoginModalOpen(false);
+          setLoginNotice(null);
+        }}
         onLoginSuccess={(user) => setCurrentUser(user)}
+        notice={loginNotice}
         lang={lang}
       />
 
@@ -208,4 +234,10 @@ export function App() {
   );
 }
 
-export default App;
+export default function AppWithErrorBoundary() {
+  return (
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
+  );
+}

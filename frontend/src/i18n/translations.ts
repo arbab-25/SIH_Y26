@@ -6,13 +6,14 @@ export const translations = {
     
     // Navigation
     navHome: "Scan / Upload",
-    navSummary: "Summary",
+    navSummary: "Analysis",
     navAnalysis: "Detailed Analysis",
     navRuleBook: "Rule Book",
     navReports: "Reports",
     navHistory: "Scan History",
     navDashboard: "Dashboard",
     navSettings: "Settings",
+    guestLimitReached: "Free guest scans are used up. Sign in to keep scanning and to keep your records permanent.",
 
     // Auth
     login: "Sign In",
@@ -137,13 +138,14 @@ export const translations = {
     
     // Navigation
     navHome: "स्कैन / अपलोड",
-    navSummary: "सारांश",
+    navSummary: "विश्लेषण",
     navAnalysis: "विस्तृत विश्लेषण",
     navRuleBook: "नियम पुस्तिका",
     navReports: "रिपोर्ट्स",
     navHistory: "स्कैन इतिहास",
     navDashboard: "डैशबोर्ड",
     navSettings: "सेटिंग्स",
+    guestLimitReached: "मुफ़्त अतिथि स्कैन समाप्त हो गए हैं। स्कैन जारी रखने और रिकॉर्ड स्थायी रखने के लिए साइन इन करें।",
 
     // Auth
     login: "लॉग इन",

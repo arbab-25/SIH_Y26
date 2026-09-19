@@ -67,6 +67,8 @@ async def create_report(
 
     logo_path = os.path.join(backend_root, "..", "LOGO.jpeg")
     if not os.path.exists(logo_path):
+        logo_path = os.path.join(backend_root, "..", "assets", "LOGO.jpeg")
+    if not os.path.exists(logo_path):
         logo_path = os.path.join(backend_root, "LOGO.jpeg")
 
     report_payload = {
@@ -216,7 +218,7 @@ async def download_report_pdf(report_id_or_number: str, db: AsyncSession = Depen
             )
         )
         scan = (await db.execute(stmt_scan)).scalar_one()
-        logo_path = os.path.join(backend_root, "..", "LOGO.jpeg")
+        logo_path = os.path.join(backend_root, "..", "assets", "LOGO.jpeg")
         generate_compliance_pdf(
             report_data={
                 "report_number": report.report_number,

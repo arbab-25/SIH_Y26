@@ -13,7 +13,7 @@ export const MobileTabBar: React.FC<MobileTabBarProps> = ({ activeTab, setActive
 
   const tabs = [
     { id: 'scan', label: t.navHome, icon: Camera },
-    { id: 'summary', label: t.navSummary, icon: ShieldCheck },
+    { id: 'analysis', label: t.navSummary, icon: ShieldCheck },
     { id: 'rulebook', label: t.navRuleBook, icon: BookOpen },
     { id: 'reports', label: t.navReports, icon: FileText },
     { id: 'dashboard', label: t.navDashboard, icon: BarChart2 },

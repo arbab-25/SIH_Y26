@@ -13,7 +13,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, lang 
 
   const navItems = [
     { id: 'scan', label: t.navHome, icon: Camera },
-    { id: 'summary', label: t.navSummary, icon: ShieldCheck },
+    { id: 'analysis', label: t.navSummary, icon: ShieldCheck },
     { id: 'rulebook', label: t.navRuleBook, icon: BookOpen },
     { id: 'reports', label: t.navReports, icon: FileText },
     { id: 'history', label: t.navHistory, icon: Clock },

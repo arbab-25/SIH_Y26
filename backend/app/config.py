@@ -1,5 +1,6 @@
 """Application configuration loaded from environment variables."""
 
+import re
 from pydantic import field_validator
 from pydantic_settings import BaseSettings
 from typing import Optional
@@ -44,18 +45,28 @@ class Settings(BaseSettings):
     OCR_CONFIDENCE_THRESHOLD: float = 0.75
     OCR_ENGINE: str = "tesseract"  # "tesseract" or "paddleocr"
 
-    # CORS
-    CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
+    # CORS – defaults include the deployed frontend so a missing env var can never lock out users
+    CORS_ORIGINS: str = (
+        "http://localhost:5173,http://localhost:3000,"
+        "https://codemaze-frontend-m6f0.onrender.com"
+    )
 
     # App
     APP_NAME: str = "CODE MAZE"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
 
+    # Security
+    SECURE_COOKIES: bool = True
+    ENVIRONMENT: str = "development"
+
     # Rate limiting
     RATE_LIMIT_SCANS_PER_MIN: int = 30
     GUEST_FREE_SCAN_LIMIT: int = 3
     GUEST_FREE_SCANS: int = 3
+
+    # Uploads
+    MAX_IMAGES_PER_SCAN: int = 5
 
     @field_validator("DATABASE_URL", "DATABASE_URL_SYNC", mode="before")
     @classmethod
@@ -76,10 +87,22 @@ class Settings(BaseSettings):
     @field_validator("DATABASE_URL", mode="after")
     @classmethod
     def use_asyncpg_for_runtime(cls, url: str) -> str:
-        """Neon emits postgresql:// URLs; FastAPI needs SQLAlchemy's asyncpg dialect."""
+        """Neon emits postgresql:// URLs; FastAPI needs SQLAlchemy's asyncpg dialect.
+
+        asyncpg rejects the libpq-style 'sslmode' query parameter (this broke every
+        Neon/Render deployment with: connect() got an unexpected keyword argument
+        'sslmode'), so we strip it here and force SSL in database.py for remote hosts.
+        """
+        url = re.sub(r"([?&])sslmode=[^&]+", lambda m: "?" if m.group(1) == "?" else "", url).rstrip("?")
         if url.startswith("postgresql://"):
-            return url.replace("postgresql://", "postgresql+asyncpg://", 1)
+            url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
         return url
+
+    @field_validator("DATABASE_URL_SYNC", mode="after")
+    @classmethod
+    def strip_sslmode_sync(cls, url: str) -> str:
+        """Strip libpq sslmode from the Alembic sync URL (pg8000 rejects it too)."""
+        return re.sub(r"([?&])sslmode=[^&]+", lambda m: "?" if m.group(1) == "?" else "", url).rstrip("?")
 
     @property
     def cors_origins_list(self) -> list[str]:

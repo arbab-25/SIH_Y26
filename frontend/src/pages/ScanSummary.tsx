@@ -1,14 +1,17 @@
 import React, { useState } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
-import { ShieldCheck, AlertTriangle, AlertCircle, FileText, Download, Send, ChevronRight } from 'lucide-react';
-import { ScanResult } from '../types';
+import { ShieldCheck, AlertTriangle, AlertCircle, FileText, Download, Send, ChevronRight, LogIn } from 'lucide-react';
+import { ScanResult, User } from '../types';
 import { translations } from '../i18n/translations';
 import { api } from '../utils/api';
 import { ReportProductModal } from '../components/ReportProductModal';
 
 interface ScanSummaryProps {
   scan: ScanResult;
+  compact?: boolean;
   onViewDetailedAnalysis: () => void;
+  currentUser?: User | null;
+  onRequireLogin?: () => void;
   lang: 'en' | 'hi';
 }
 
@@ -27,7 +30,10 @@ const ConfidenceTooltip = ({ active, payload }: { active?: boolean; payload?: Ar
 
 export const ScanSummary: React.FC<ScanSummaryProps> = ({
   scan,
+  compact = false,
   onViewDetailedAnalysis,
+  currentUser,
+  onRequireLogin,
   lang,
 }) => {
   const t = translations[lang];
@@ -100,7 +106,12 @@ export const ScanSummary: React.FC<ScanSummaryProps> = ({
     }
   };
 
+  // Reports require an account — first report triggers the sign-in popup per §6
   const handleOpenReportModal = async () => {
+    if (!currentUser) {
+      onRequireLogin?.();
+      return;
+    }
     if (!reportNumber) {
       try {
         const repRes = await api.post('/reports', { scan_id: scan.scan_id || scan.id });
@@ -113,6 +124,93 @@ export const ScanSummary: React.FC<ScanSummaryProps> = ({
   };
 
   const pieData = scan.confidence_pie?.length > 0 ? scan.confidence_pie : [];
+  const nonCompliantCount = scan.extracted_fields?.filter((f) => f.status === 'NON_COMPLIANT').length ?? 0;
+
+  if (compact) {
+    // Compact inline variant shown directly beneath the Scan / Upload workspace
+    return (
+      <div className="max-w-5xl mx-auto">
+        <div className={`p-5 rounded-2xl border ${vStyle.bg} ${vStyle.border} shadow-sm space-y-4`}>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className={`h-11 w-11 rounded-xl flex items-center justify-center ${vStyle.badge}`}>
+                <VerdictIcon size={24} />
+              </div>
+              <div>
+                <span className={`inline-block text-[11px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider ${vStyle.badge}`}>
+                  {vStyle.text}
+                </span>
+                <h3 className="text-sm font-bold text-[#12355B] mt-1 truncate max-w-[420px]">
+                  {scan.product?.name || 'Product name not detected'}
+                </h3>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="bg-white px-3 py-1.5 rounded-xl border border-slate-200 text-center">
+                <div className="text-[10px] font-bold text-slate-500 uppercase">{t.complianceScore}</div>
+                <div className="text-base font-black text-[#0E7490]">
+                  {typeof scan.compliance_score === 'number' ? `${scan.compliance_score.toFixed(1)}%` : '—'}
+                </div>
+              </div>
+              <button
+                onClick={onViewDetailedAnalysis}
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-[#12355B] hover:bg-[#0F2C4C] text-white text-xs font-bold rounded-xl shadow transition-all min-h-[40px]"
+              >
+                <span>{t.viewDetailedAnalysis}</span>
+                <ChevronRight size={14} />
+              </button>
+            </div>
+          </div>
+
+          {/* Violation summary — non-compliances highlighted red */}
+          {nonCompliantCount > 0 ? (
+            <div className="flex items-start gap-2.5 p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 font-semibold">
+              <AlertTriangle size={16} className="text-rose-600 shrink-0 mt-0.5" />
+              <span>
+                {lang === 'hi'
+                  ? `${nonCompliantCount} घोषणाएँ नियमों का उल्लंघन करती हैं (लाल रंग में चिह्नित)।`
+                  : `${nonCompliantCount} declaration${nonCompliantCount === 1 ? '' : 's'} violate statutory rules — highlighted in red below.`}
+              </span>
+            </div>
+          ) : (
+            <div className="flex items-start gap-2.5 p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 font-semibold">
+              <ShieldCheck size={16} className="text-emerald-600 shrink-0 mt-0.5" />
+              <span>
+                {lang === 'hi' ? 'सभी स्कैन की गई घोषणाएँ अनुपालित हैं।' : 'All scanned declarations are compliant.'}
+              </span>
+            </div>
+          )}
+
+          {/* Key extracted fields with red highlighting on non-compliance */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {scan.extracted_fields?.slice(0, 6).map((f, i) => {
+              const isNonComp = f.status === 'NON_COMPLIANT';
+              return (
+                <div
+                  key={i}
+                  className={`p-2.5 rounded-xl border text-xs ${
+                    isNonComp
+                      ? 'bg-rose-50 border-rose-300 text-rose-900'
+                      : f.status === 'COMPLIANT'
+                      ? 'bg-white border-slate-200 text-slate-700'
+                      : 'bg-amber-50 border-amber-200 text-amber-900'
+                  }`}
+                >
+                  <div className="text-[10px] font-bold uppercase tracking-wider opacity-70 truncate">
+                    {f.field_key.replace(/_/g, ' ')}
+                  </div>
+                  <div className={`font-bold truncate mt-0.5 ${isNonComp ? 'text-rose-700' : ''}`}>
+                    {f.field_value || <span className="italic opacity-60">Not Detected</span>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -168,8 +266,10 @@ export const ScanSummary: React.FC<ScanSummaryProps> = ({
 
           <button
             onClick={handleOpenReportModal}
+            title={currentUser ? undefined : 'Sign in to report this product'}
             className="flex items-center gap-1.5 px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl shadow transition-all min-h-[44px]"
           >
+            {!currentUser && <LogIn size={15} />}
             <Send size={15} />
             <span>{t.reportThisProduct}</span>
           </button>
@@ -204,11 +304,11 @@ export const ScanSummary: React.FC<ScanSummaryProps> = ({
                   const isComp = f.status === 'COMPLIANT';
                   const isNonComp = f.status === 'NON_COMPLIANT';
                   return (
-                    <tr key={i} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="py-2.5 font-bold text-[#12355B] capitalize">
+                    <tr key={i} className={`transition-colors ${isNonComp ? 'bg-rose-50/70 hover:bg-rose-50' : 'hover:bg-slate-50/80'}`}>
+                      <td className={`py-2.5 font-bold capitalize ${isNonComp ? 'text-rose-700' : 'text-[#12355B]'}`}>
                         {f.field_key.replace(/_/g, ' ')}
                       </td>
-                      <td className="py-2.5 text-slate-700 max-w-[220px] truncate font-medium">
+                      <td className={`py-2.5 max-w-[220px] truncate font-medium ${isNonComp ? 'text-rose-800 font-bold' : 'text-slate-700'}`}>
                         {f.field_value || <span className="text-slate-400 italic">Not Detected</span>}
                       </td>
                       <td className="py-2.5 text-right">
@@ -216,7 +316,7 @@ export const ScanSummary: React.FC<ScanSummaryProps> = ({
                           isComp
                             ? 'bg-emerald-100 text-emerald-800'
                             : isNonComp
-                            ? 'bg-rose-100 text-rose-800'
+                            ? 'bg-rose-100 text-rose-800 ring-1 ring-rose-300'
                             : 'bg-amber-100 text-amber-800'
                         }`}>
                           {f.status}

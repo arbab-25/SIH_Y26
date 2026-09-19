@@ -1,7 +1,11 @@
 import axios from 'axios';
 
-// Resolve API Base URL from environment or default to local backend
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
+// Resolve API Base URL from environment. Production fallback points at the live
+// Render backend so a fresh build without VITE_API_BASE_URL still works.
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ||
+  (import.meta.env.PROD
+    ? 'https://codemaze-api-m6f0.onrender.com/api/v1'
+    : 'http://localhost:8000/api/v1');
 
 // Generate or retrieve persistent anonymous device ID for guest scan tracking per §6
 export const getDeviceId = (): string => {

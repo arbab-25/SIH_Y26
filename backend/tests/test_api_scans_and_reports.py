@@ -89,8 +89,8 @@ async def test_full_scan_report_workflow():
         assert email_resp.status_code == 200
         assert email_resp.json()["status"] in ("sent", "failed")
 
-        # 8. List Scans
-        list_resp = await ac.get("/api/v1/scans?page=1&size=10")
+        # 8. List Scans (same guest device header as the scan creation)
+        list_resp = await ac.get("/api/v1/scans?page=1&size=10", headers=headers)
         assert list_resp.status_code == 200
         assert len(list_resp.json()["items"]) >= 1
 

@@ -18,7 +18,7 @@ from app.models.product import Product
 from app.models.extracted_field import ExtractedField
 from app.models.violation import Violation, Severity
 from app.models.field_override import FieldOverride
-from app.api.deps import get_current_user_optional, get_guest_device_id
+from app.api.deps import get_current_user, get_current_user_optional, get_guest_device_id
 from app.services.ocr_service import run_ocr
 from app.services.field_extractors import extract_fields_from_ocr
 from app.services.rule_engine import evaluate_product_compliance
@@ -63,7 +63,13 @@ async def create_scan(
     identifier = str(current_user.id) if current_user else guest_device_id
     check_rate_limit(identifier, max_requests=30, window_seconds=60)
 
-    # 2. Save uploaded images
+    # 2. Save uploaded images (secure upload handling: count + size + magic-byte checks)
+    if len(images) > settings.MAX_IMAGES_PER_SCAN:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Too many images. Maximum {settings.MAX_IMAGES_PER_SCAN} per scan."
+        )
+
     upload_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "uploads")
     os.makedirs(upload_dir, exist_ok=True)
 
@@ -327,6 +333,7 @@ async def get_scan_details(scan_id: uuid.UUID, db: AsyncSession = Depends(get_db
 
 @router.get("")
 async def list_scans(
+    request: Request,
     page: int = Query(1, ge=1),
     size: int = Query(25, ge=1, le=100),
     verdict: Optional[str] = Query(None),
@@ -344,16 +351,31 @@ async def list_scans(
     if category:
         stmt = stmt.where(Scan.category.ilike(f"%{category}%"))
 
-    # If regular inspector, show their scans + guest scans
+    # Data isolation: inspectors see only their own scans; guests see only their device's scans.
+    # Admins/Senior Officers see everything.
     if current_user and current_user.role.value == "INSPECTOR":
-        stmt = stmt.where(or_(Scan.user_id == current_user.id, Scan.user_id == None))
+        stmt = stmt.where(Scan.user_id == current_user.id)
+    elif not current_user:
+        device_id = get_guest_device_id(request)
+        if device_id:
+            stmt = stmt.where(Scan.guest_device_id == device_id)
+        else:
+            stmt = stmt.where(Scan.id == None)  # no device id -> no guest history
 
     stmt = stmt.order_by(desc(Scan.created_at)).offset(offset).limit(size)
     res = await db.execute(stmt)
     scans = res.scalars().all()
 
-    # Total count
+    # Total count (mirror the same visibility filter)
     count_stmt = select(func.count(Scan.id))
+    if current_user and current_user.role.value == "INSPECTOR":
+        count_stmt = count_stmt.where(Scan.user_id == current_user.id)
+    elif not current_user:
+        device_id = get_guest_device_id(request)
+        if device_id:
+            count_stmt = count_stmt.where(Scan.guest_device_id == device_id)
+        else:
+            count_stmt = count_stmt.where(Scan.id == None)
     if verdict:
         count_stmt = count_stmt.where(Scan.verdict == Verdict(verdict.upper()))
     total = (await db.execute(count_stmt)).scalar() or 0
@@ -454,13 +476,19 @@ async def override_field(
 
 
 @router.delete("/{scan_id}")
-async def delete_scan(scan_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    """Delete scan attempt."""
+async def delete_scan(
+    scan_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Delete scan attempt (authenticated users only; admins or owning inspectors)."""
     stmt = select(Scan).where(Scan.id == scan_id)
     res = await db.execute(stmt)
     scan = res.scalar_one_or_none()
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
+    if scan.user_id and scan.user_id != current_user.id and current_user.role.value != "ADMIN":
+        raise HTTPException(status_code=403, detail="Not authorized to delete this scan")
     await db.delete(scan)
     await db.commit()
     return {"status": "deleted", "scan_id": str(scan_id)}

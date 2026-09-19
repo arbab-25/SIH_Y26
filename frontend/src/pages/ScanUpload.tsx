@@ -1,17 +1,29 @@
 import React, { useState, useRef } from 'react';
-import { Camera, UploadCloud, AlertCircle, RefreshCw, Layers, CheckCircle2, X, ShieldCheck } from 'lucide-react';
+import { Camera, UploadCloud, AlertCircle, RefreshCw, Layers, CheckCircle2, X, ShieldCheck, LogIn } from 'lucide-react';
 import { api } from '../utils/api';
 import { queueOfflineScan } from '../utils/offlineQueue';
 import { translations } from '../i18n/translations';
-import { ScanResult } from '../types';
+import { ScanResult, User } from '../types';
 
 interface ScanUploadProps {
   onScanComplete: (result: ScanResult) => void;
   lang: 'en' | 'hi';
+  currentUser?: User | null;
+  guestScanCount?: number;
+  onRequireLogin?: (notice?: string) => void;
   onOfflineQueued?: () => void;
 }
 
-export const ScanUpload: React.FC<ScanUploadProps> = ({ onScanComplete, lang, onOfflineQueued }) => {
+const GUEST_FREE_SCANS = 3;
+
+export const ScanUpload: React.FC<ScanUploadProps> = ({
+  onScanComplete,
+  lang,
+  currentUser,
+  guestScanCount = 0,
+  onRequireLogin,
+  onOfflineQueued,
+}) => {
   const t = translations[lang];
   const [category, setCategory] = useState('food');
   const [packageType, setPackageType] = useState('retail');
@@ -179,6 +191,16 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({ onScanComplete, lang, on
       return;
     }
 
+    // Compulsory sign-in after the 3rd guest scan per §6
+    if (!currentUser && guestScanCount >= GUEST_FREE_SCANS) {
+      onRequireLogin?.(
+        lang === 'hi'
+          ? `आपने ${GUEST_FREE_SCANS} मुफ़्त स्कैन कर लिए हैं। जारी रखने के लिए साइन इन करें।`
+          : `You've used all ${GUEST_FREE_SCANS} free guest scans. Please sign in to continue scanning.`
+      );
+      return;
+    }
+
     setLoading(true);
     setErrorMessage(null);
     setActiveStep(1); // Uploading
@@ -248,9 +270,21 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({ onScanComplete, lang, on
           <h1 className="text-2xl sm:text-3xl font-extrabold text-[#12355B] tracking-tight">{t.scanTitle}</h1>
           <p className="text-sm text-slate-600 mt-2 max-w-2xl">{t.scanSubtitle}</p>
         </div>
-        <div className="flex items-center gap-2 self-start md:self-auto px-3.5 py-2 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold shrink-0">
-          <ShieldCheck size={16} />
-          <span>Evidence-led assessment</span>
+        <div className="flex flex-col items-stretch gap-2 self-start md:self-auto shrink-0">
+          <div className="flex items-center justify-center gap-2 px-3.5 py-2 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold">
+            <ShieldCheck size={16} />
+            <span>Evidence-led assessment</span>
+          </div>
+          {!currentUser && (
+            <div className="flex items-center justify-center gap-2 px-3.5 py-2 bg-amber-50 text-amber-800 border border-amber-200 rounded-xl text-xs font-bold">
+              <LogIn size={15} />
+              <span>
+                {lang === 'hi'
+                  ? `अतिथि मोड (स्कैन ${Math.min(guestScanCount + 1, GUEST_FREE_SCANS)}/${GUEST_FREE_SCANS})`
+                  : `Guest Mode (Scan ${Math.min(guestScanCount + 1, GUEST_FREE_SCANS)}/${GUEST_FREE_SCANS})`}
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -424,6 +458,11 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({ onScanComplete, lang, on
             <>
               <RefreshCw size={18} className="animate-spin text-cyan-400" />
               <span>{t.analyzing}</span>
+            </>
+          ) : !currentUser && guestScanCount >= GUEST_FREE_SCANS ? (
+            <>
+              <LogIn size={18} />
+              <span>{lang === 'hi' ? 'साइन इन करें और स्कैन जारी रखें' : 'Sign in to continue scanning'}</span>
             </>
           ) : (
             <>

@@ -13,13 +13,13 @@ services:
     healthCheckPath: /api/v1/health
     envVars:
       - key: DATABASE_URL
-        sync: false          # You paste this in the Render dashboard (Neon PostgreSQL async URL)
+        sync: false          # Paste the Neon PostgreSQL connection string in the Render dashboard
       - key: DATABASE_URL_SYNC
-        sync: false          # Sync version for Alembic (pg8000 driver)
+        sync: false          # Sync version for Alembic
       - key: JWT_SECRET
         generateValue: true  # Render auto-generates a secure random value
       - key: CORS_ORIGINS
-        value: https://codemaze-frontend.onrender.com  # Update after frontend deploys
+        value: https://codemaze-frontend-m6f0.onrender.com
       - key: STORAGE_BACKEND
         value: local
       - key: OCR_ENGINE
@@ -40,6 +40,8 @@ services:
         value: noreply@codemaze.app
       - key: DEBUG
         value: "false"
+      - key: SECURE_COOKIES
+        value: "true"
 
 
   # ── Frontend: React/Vite Static Site ──────────────────────────────────────
@@ -55,4 +57,4 @@ services:
         destination: /index.html   # SPA fallback — all routes served by index.html
     envVars:
       - key: VITE_API_BASE_URL
-        value: https://codemaze-api-hz92.onrender.com/api/v1
+        value: https://codemaze-api-m6f0.onrender.com/api/v1

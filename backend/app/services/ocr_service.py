@@ -1,5 +1,12 @@
-"""OCR Service utilizing PaddleOCR PP-OCRv4 ONNX model cached at startup.
-Extracts per-word text, bounding-boxes, and confidence percentages per §5 & §7.2.
+"""OCR Service — extracts per-word text, bounding-boxes, and confidence per §5 & §7.2.
+
+Engine priority (first available wins, cached at startup per §5):
+1. RapidOCR (PaddleOCR PP-OCRv4 ONNX models) — best accuracy on Indian packaging
+2. Tesseract via pytesseract — installed in the Docker image
+
+Previously only RapidOCR was attempted but the package was missing from
+requirements.txt, so OCR silently returned nothing and 'text detection' appeared
+broken. This module now degrades gracefully to Tesseract.
 """
 
 from typing import List, Dict, Any, Optional, Tuple
@@ -10,22 +17,89 @@ import os
 from app.services.image_service import is_image_blurry, preprocess_image_for_ocr
 from app.config import settings
 
-# Global in-memory model cache per §5: "Cache OCR models in memory at startup, never per-request"
+# Global in-memory engine cache per §5: "Cache OCR models in memory at startup, never per-request"
 _OCR_ENGINE = None
+_OCR_ENGINE_NAME: Optional[str] = None
+
+
+class _RapidOCREngine:
+    """Adapter exposing engine(image) -> list[(box, text, score)] for RapidOCR."""
+
+    name = "rapidocr"
+
+    def __init__(self):
+        from rapidocr_onnxruntime import RapidOCR
+        self._engine = RapidOCR()
+
+    def __call__(self, image: np.ndarray):
+        results, _elapse = self._engine(image)
+        return results
+
+
+class _TesseractEngine:
+    """Adapter exposing engine(image) -> list[(box, text, score)] using pytesseract."""
+
+    name = "tesseract"
+
+    def __call__(self, image: np.ndarray):
+        import pytesseract
+
+        h, w = image.shape[:2]
+        data = pytesseract.image_to_data(
+            image, output_type=pytesseract.Output.DICT, config="--psm 6"
+        )
+        results = []
+        for i in range(len(data["text"])):
+            text = (data["text"][i] or "").strip()
+            conf_raw = data["conf"][i]
+            try:
+                conf = float(conf_raw)
+            except (TypeError, ValueError):
+                continue
+            if not text or conf < 0:
+                continue
+            x, y, bw, bh = data["left"][i], data["top"][i], data["width"][i], data["height"][i]
+            box = [[x, y], [x + bw, y], [x + bw, y + bh], [x, y + bh]]
+            results.append((box, text, conf / 100.0))
+        return results
 
 
 def get_ocr_engine():
-    """Returns singleton OCR engine instance cached in memory."""
-    global _OCR_ENGINE
-    if _OCR_ENGINE is None:
-        try:
-            from rapidocr_onnxruntime import RapidOCR
-            _OCR_ENGINE = RapidOCR()
-            print("[OK] RapidOCR (PaddleOCR PP-OCRv4) loaded into memory.")
-        except Exception as e:
-            print(f"[WARN] Failed to load RapidOCR: {e}. Attempting fallback.")
-            _OCR_ENGINE = None
-    return _OCR_ENGINE
+    """Returns a singleton OCR engine instance cached in memory (never None if any engine installed)."""
+    global _OCR_ENGINE, _OCR_ENGINE_NAME
+    if _OCR_ENGINE is not None:
+        return _OCR_ENGINE
+
+    errors = []
+
+    # 1. Preferred: RapidOCR (PaddleOCR PP-OCRv4 ONNX)
+    try:
+        _OCR_ENGINE = _RapidOCREngine()
+        _OCR_ENGINE_NAME = _OCR_ENGINE.name
+        print(f"[OK] {_OCR_ENGINE_NAME} loaded into memory.")
+        return _OCR_ENGINE
+    except Exception as e:  # ImportError or model load failure
+        errors.append(f"rapidocr: {e}")
+
+    # 2. Fallback: Tesseract binary via pytesseract
+    try:
+        engine = _TesseractEngine()
+        # Probe: raises pytesseract.TesseractNotFoundError if binary missing
+        engine(np.zeros((40, 120), dtype=np.uint8))
+        _OCR_ENGINE = engine
+        _OCR_ENGINE_NAME = engine.name
+        print(f"[OK] {_OCR_ENGINE_NAME} loaded into memory (rapidocr unavailable).")
+        return _OCR_ENGINE
+    except Exception as e:
+        errors.append(f"tesseract: {e}")
+
+    print(f"[ERROR] No OCR engine available. Tried -> {'; '.join(errors)}")
+    _OCR_ENGINE_NAME = None
+    return None
+
+
+def get_ocr_engine_name() -> Optional[str]:
+    return _OCR_ENGINE_NAME
 
 
 class OCRItem:
@@ -47,9 +121,7 @@ def run_ocr(
     image_input: Any,
     detect_blur: bool = True
 ) -> Tuple[List[OCRItem], Dict[str, Any]]:
-    """Run OCR on image path or numpy array.
-    Returns (items, metadata).
-    """
+    """Run OCR on image path or numpy array. Returns (items, metadata)."""
     # Load image if file path
     if isinstance(image_input, str):
         image = cv2.imread(image_input)
@@ -76,18 +148,26 @@ def run_ocr(
     # Run OCR engine
     engine = get_ocr_engine()
     if engine is None:
-        return [], {"error": "OCR engine not available"}
-
-    try:
-        results, elapse = engine(enhanced)
-    except Exception as e:
-        results, elapse = engine(image)
+        return [], {"error": "OCR engine not available on server. Contact the administrator."}
 
     items: List[OCRItem] = []
+    try:
+        results = engine(enhanced)
+    except Exception:
+        try:
+            results = engine(image)
+        except Exception as e:
+            print(f"[WARN] OCR execution failed: {e}")
+            results = None
+
     if results:
-        for box, text, score in results:
-            if text and text.strip():
-                items.append(OCRItem(text=text, confidence=score, bbox=box))
+        for entry in results:
+            try:
+                box, text, score = entry[0], entry[1], entry[2]
+            except (TypeError, IndexError):
+                continue
+            if text and str(text).strip():
+                items.append(OCRItem(text=str(text), confidence=score, bbox=box))
 
     # Calculate confidence distribution for Recharts pie chart (§7.2)
     # Slices: High (≥90%), Medium (75–89%), Low (<75%), Not detected
@@ -111,6 +191,7 @@ def run_ocr(
     metadata = {
         "blurry": False,
         "blur_score": blur_score,
+        "engine": engine.name,
         "total_words": len(items),
         "avg_confidence": round(avg_conf, 2),
         "confidence_distribution": [

@@ -18,9 +18,12 @@ from app.rule_checkers.base import CheckResult
 
 def is_fssai_pdf_available() -> bool:
     """Check if fssai.pdf is available in the workspace or data directory."""
+    backend_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    repo_root = os.path.dirname(backend_root)
     candidates = [
         r"d:\ARBAB\SIH DATA\fssai.pdf",
-        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "fssai.pdf")
+        os.path.join(backend_root, "fssai.pdf"),
+        os.path.join(repo_root, "assets", "fssai.pdf"),
     ]
     return any(os.path.exists(p) for p in candidates)
 
