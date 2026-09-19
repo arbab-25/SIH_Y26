@@ -1,0 +1,242 @@
+"""Deterministic field extractors using Regex and RapidFuzz per §3 & §8.
+Extracts:
+- Brand, Product Name, Generic Name
+- Net Quantity (value + SI unit) & detect vague quantity words
+- Maximum Retail Price (MRP) & check tax qualification
+- Month and Year of manufacture / packing / import
+- Manufacturer / Packer / Importer name, address, and 6-digit PIN
+- Consumer Care contact (Phone, Email, Address)
+- FSSAI License Number (14-digits) & Food attributes
+- Country of Origin
+- Barcode / GTIN
+"""
+
+import re
+from typing import Dict, Any, List, Optional
+from rapidfuzz import fuzz, process
+
+
+class ExtractedData:
+    def __init__(self):
+        self.fields: Dict[str, Dict[str, Any]] = {}
+
+    def set_field(
+        self,
+        key: str,
+        value: Any,
+        confidence: float,
+        bbox: Optional[list] = None,
+        source_text: Optional[str] = None
+    ):
+        self.fields[key] = {
+            "value": value,
+            "confidence": round(confidence, 2),
+            "bbox": bbox,
+            "source_text": source_text
+        }
+
+    def get(self, key: str, default=None):
+        return self.fields.get(key, {}).get("value", default)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return self.fields
+
+
+def extract_fields_from_ocr(items: List[Any], full_text: Optional[str] = None) -> ExtractedData:
+    """Extract structured product declarations from OCR items."""
+    data = ExtractedData()
+
+    if not items:
+        return data
+
+    text_lines = [item.text for item in items]
+    combined_text = full_text if full_text else "\n".join(text_lines)
+
+    # ----------------------------------------------------
+    # 1. FSSAI License Number (14 digits)
+    # ----------------------------------------------------
+    fssai_match = re.search(r"(?:lic(?:ence)?(?:\s*no\.?)?|fssai(?:\s*no\.?)?)[^\d]*(\d{14})\b", combined_text, re.IGNORECASE)
+    if not fssai_match:
+        # Standalone 14-digit sequence
+        fssai_match = re.search(r"\b(1\d{13})\b", combined_text)
+
+    if fssai_match:
+        fssai_num = fssai_match.group(1)
+        # Find corresponding OCR item for confidence and bbox
+        best_item = max(
+            (it for it in items if fssai_num in it.text or "fssai" in it.text.lower() or "lic" in it.text.lower()),
+            key=lambda x: x.confidence,
+            default=items[0]
+        )
+        data.set_field("fssai_number", fssai_num, best_item.confidence, best_item.bbox, best_item.text)
+
+    # ----------------------------------------------------
+    # 2. Manufacturer Name & Address & PIN Code (Rule 10(1))
+    # ----------------------------------------------------
+    mfg_keywords = ["manufactured by", "mfd by", "packed by", "pkd by", "mktd by", "marketed by"]
+    mfg_found = False
+    for i, line in enumerate(text_lines):
+        line_lower = line.lower()
+        if any(kw in line_lower for kw in mfg_keywords):
+            mfg_found = True
+            mfg_header_item = items[i]
+            # Next lines are likely manufacturer name and address
+            subsequent = text_lines[i+1:i+5]
+            mfg_name = text_lines[i+1] if i + 1 < len(text_lines) else line
+            address_lines = text_lines[i+2:i+5] if i + 2 < len(text_lines) else []
+            full_address = ", ".join(address_lines) if address_lines else mfg_name
+
+            data.set_field("manufacturer_name", mfg_name, mfg_header_item.confidence, mfg_header_item.bbox, line)
+            if full_address:
+                data.set_field("manufacturer_address", full_address, mfg_header_item.confidence, mfg_header_item.bbox)
+            break
+
+    # Look for 6-digit Indian PIN code (cannot start with 0)
+    pin_match = re.search(r"\b([1-9]\d{5})\b", combined_text)
+    if pin_match:
+        pin = pin_match.group(1)
+        item_with_pin = next((it for it in items if pin in it.text), items[0])
+        data.set_field("pin_code", pin, item_with_pin.confidence, item_with_pin.bbox, item_with_pin.text)
+
+    # ----------------------------------------------------
+    # 3. Consumer Care Details (Rule 6(2))
+    # ----------------------------------------------------
+    # Email
+    email_match = re.search(r"([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)", combined_text)
+    if email_match:
+        email = email_match.group(1).rstrip(".")
+        item_email = next((it for it in items if email[:10] in it.text), items[0])
+        data.set_field("consumer_care_email", email, item_email.confidence, item_email.bbox, item_email.text)
+
+    # Telephone / Phone
+    phone_match = re.search(r"(?:ph(?:one)?|tel|care|call|customer\s*care|no\.?)[^\d+]*(\+?[\d\s\-()]{7,16})", combined_text, re.IGNORECASE)
+    if phone_match:
+        raw_phone = phone_match.group(1).strip()
+        cleaned_phone = re.sub(r"[^\d+]", "", raw_phone)
+        if len(cleaned_phone) >= 7:
+            item_phone = next((it for it in items if raw_phone[:5] in it.text), items[0])
+            data.set_field("consumer_care_phone", raw_phone, item_phone.confidence, item_phone.bbox, item_phone.text)
+
+    # ----------------------------------------------------
+    # 4. Maximum Retail Price (MRP) & Tax Qualification (Rule 6(1)(e))
+    # ----------------------------------------------------
+    mrp_regex = re.compile(
+        r"(?:m\.?r\.?p\.?|max(?:imum)?\s*retail\s*price)[^\d₹Rs]*[₹Rs\.]*\s*([0-9]+(?:\.[0-9]{1,2})?)",
+        re.IGNORECASE
+    )
+    mrp_match = mrp_regex.search(combined_text)
+    if not mrp_match:
+        # Secondary pattern: standalone Rs. XX.XX or ₹ XX.XX
+        mrp_match = re.search(r"(?:₹|Rs\.?)\s*([0-9]+(?:\.[0-9]{1,2})?)", combined_text)
+
+    if mrp_match:
+        val_str = mrp_match.group(1)
+        val = float(val_str)
+        # Find item matching MRP
+        best_mrp_item = next((it for it in items if val_str in it.text or "mrp" in it.text.lower()), items[0])
+        data.set_field("mrp", val, best_mrp_item.confidence, best_mrp_item.bbox, best_mrp_item.text)
+
+        # Check for "inclusive of all taxes" or "incl. of all taxes"
+        context_around_mrp = combined_text[max(0, mrp_match.start() - 50):min(len(combined_text), mrp_match.end() + 100)].lower()
+        has_taxes = ("incl" in context_around_mrp and "tax" in context_around_mrp) or "inclusive of all taxes" in context_around_mrp
+        data.set_field("mrp_inclusive_taxes", has_taxes, best_mrp_item.confidence, best_mrp_item.bbox, context_around_mrp)
+    else:
+        # Check if the text explicitly states MRP
+        for it in items:
+            if "mrp" in it.text.lower():
+                data.set_field("mrp_detected_text", it.text, it.confidence, it.bbox, it.text)
+                break
+
+    # ----------------------------------------------------
+    # 5. Net Quantity & Units (Rule 6(1)(c), Rule 12(6), Rule 13)
+    # ----------------------------------------------------
+    qty_regex = re.compile(
+        r"(?:net\s*(?:wt\.?|weight|qty\.?|quantity)|pkd\.?|volume)?\s*([0-9]+(?:\.[0-9]+)?)\s*(kg|g|gm|gms|gram|grams|ml|l|ltr|litre|litres|liter|liters|n|u)\b",
+        re.IGNORECASE
+    )
+    qty_match = qty_regex.search(combined_text)
+    if qty_match:
+        qty_val = float(qty_match.group(1))
+        unit = qty_match.group(2).lower()
+        best_qty_item = next((it for it in items if qty_match.group(1) in it.text and unit in it.text.lower()), items[0])
+        data.set_field("net_quantity_value", qty_val, best_qty_item.confidence, best_qty_item.bbox, best_qty_item.text)
+        data.set_field("net_quantity_unit", unit, best_qty_item.confidence, best_qty_item.bbox, best_qty_item.text)
+
+    # Check for prohibited vague quantity words (Rule 12(6))
+    vague_words = ["minimum", "not less than", "average", "about", "approximately"]
+    for vw in vague_words:
+        if vw in combined_text.lower():
+            vague_item = next((it for it in items if vw in it.text.lower()), items[0])
+            data.set_field("vague_quantity_found", vw, vague_item.confidence, vague_item.bbox, vague_item.text)
+            break
+
+    # ----------------------------------------------------
+    # 6. Date of Manufacture / Packing / Import (Rule 6(1)(d))
+    # ----------------------------------------------------
+    date_regex = re.compile(
+        r"(?:mfd|mfg|pkd|packed|manufactured|imported)?\s*[:\-.]?\s*(\b(?:0?[1-9]|1[0-2])[\/\.-](?:20)?\d{2}\b|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s\/\.-]+(?:20)?\d{2}\b)",
+        re.IGNORECASE
+    )
+    date_match = date_regex.search(combined_text)
+    if date_match:
+        raw_date = date_match.group(1)
+        item_date = next((it for it in items if raw_date in it.text), items[0])
+        data.set_field("mfg_date_str", raw_date, item_date.confidence, item_date.bbox, item_date.text)
+
+    # Best before / use by date (Rule 6(1)(da))
+    bb_regex = re.compile(
+        r"(?:best\s*before|use\s*by|expiry|exp\.?)\s*[:\-.]?\s*([a-zA-Z0-9\s\/\.-]{3,25})",
+        re.IGNORECASE
+    )
+    bb_match = bb_regex.search(combined_text)
+    if bb_match:
+        bb_text = bb_match.group(1).strip()
+        item_bb = next((it for it in items if "best before" in it.text.lower() or "use by" in it.text.lower() or "exp" in it.text.lower()), items[0])
+        data.set_field("best_before", bb_text, item_bb.confidence, item_bb.bbox, item_bb.text)
+
+    # ----------------------------------------------------
+    # 7. Country of Origin (Rule 6(1)(aa))
+    # ----------------------------------------------------
+    origin_regex = re.compile(
+        r"(?:country\s*of\s*origin|made\s*in|product\s*of)\s*[:\-.]?\s*([a-zA-Z\s]{3,30})",
+        re.IGNORECASE
+    )
+    origin_match = origin_regex.search(combined_text)
+    if origin_match:
+        country = origin_match.group(1).strip()
+        item_origin = next((it for it in items if "origin" in it.text.lower() or "made in" in it.text.lower()), items[0])
+        data.set_field("country_of_origin", country, item_origin.confidence, item_origin.bbox, item_origin.text)
+
+    # ----------------------------------------------------
+    # 8. Brand & Product / Generic Name (Rule 6(1)(b))
+    # ----------------------------------------------------
+    if len(items) > 0:
+        # First prominent header is usually brand/product name
+        brand_item = items[0]
+        data.set_field("brand", brand_item.text, brand_item.confidence, brand_item.bbox, brand_item.text)
+        if len(items) > 1:
+            product_name = f"{items[0].text} {items[1].text}"
+            data.set_field("product_name", product_name, min(items[0].confidence, items[1].confidence), items[0].bbox, product_name)
+
+    # ----------------------------------------------------
+    # 9. Ingredients & Nutritional Facts (FSSAI / Food articles)
+    # ----------------------------------------------------
+    if "ingredients" in combined_text.lower():
+        ing_item = next((it for it in items if "ingredients" in it.text.lower()), items[0])
+        data.set_field("ingredients_declared", True, ing_item.confidence, ing_item.bbox, ing_item.text)
+
+    if any(term in combined_text.lower() for term in ["nutritional", "nutrition facts", "nutririon", "calories", "energy"]):
+        nut_item = next((it for it in items if any(k in it.text.lower() for k in ["nutrition", "energy", "calories"])), items[0])
+        data.set_field("nutritional_info_declared", True, nut_item.confidence, nut_item.bbox, nut_item.text)
+
+    # ----------------------------------------------------
+    # 10. Barcode / GTIN
+    # ----------------------------------------------------
+    # Check for 13 or 14-digit GTIN / EAN barcode numbers
+    gtin_match = re.search(r"\b([0-9]{13,14})\b", combined_text)
+    if gtin_match and (not fssai_match or gtin_match.group(1) != fssai_match.group(1)):
+        gtin = gtin_match.group(1)
+        item_gtin = next((it for it in items if gtin in it.text), items[0])
+        data.set_field("barcode_gtin", gtin, item_gtin.confidence, item_gtin.bbox, item_gtin.text)
+
+    return data
