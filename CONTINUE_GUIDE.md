@@ -48,6 +48,8 @@ README.md
    - no invented dashboard figures, rule trends, or manufacturers
    - real-data empty and connection-recovery states instead
 9. Upgraded the interface hierarchy, scan workspace, navigation shell, mobile layout, visual tokens, and build output splitting.
+10. Linked the workspace to Neon project `misty-term-18610406` (`FINAL`) on the `production` database branch.
+11. Added `neon.ts` and `hello.ts`, then deployed the configured Neon Auth service and `api` Neon Function.
 
 ## Verification already completed
 
@@ -55,7 +57,7 @@ From `D:\ARBAB\SIH Y26\frontend`:
 
 - `npm ci` completed successfully.
 - `npm run build` passed successfully.
-- `npm run lint` completed with warnings only after excluding the recovery dependency folder from the frontend lint scope.
+- The subsequent quality pass fixed the inherited unused-import, stale dependency, and render-created component warnings. `npm run lint` now has only React's conservative async effect/set-state advisories; `npm run build` passes.
 
 Live endpoint checks using PowerShell:
 
@@ -69,6 +71,19 @@ Live endpoint checks using PowerShell:
 Backend pytest could not run because the current Python environment has no `pytest` module. The copied backend contains local `.venv`, `venv`, `.pytest_cache`, `codemaze.db`, and `test.db`; these should be treated as inherited development artifacts and must not be committed.
 
 The browser check at localhost showed an expected dashboard API CORS failure when pointed at the deployed Render API. Render is configured for the deployed frontend origin, not localhost. See `docs/walkthrough.md` for the safe local-testing configuration.
+
+## Neon deployment state
+
+- Project: `misty-term-18610406` (`FINAL`)
+- Database branch: `production` (`br-damp-fire-b3m4492q`)
+- Region: `aws-ap-southeast-1`
+- Neon config: `neon.ts`
+- Function source: `hello.ts`
+- Function slug: `api`
+- Invocation URL: `https://br-damp-fire-b3m4492q-api.compute.c-4.ap-southeast-1.aws.neon.tech/`
+- Verified response: HTTP 200, `Hello from Neon Functions`
+
+Neon writes branch connection values to the ignored `.env.local` file and link metadata to the ignored `.neon` file. Never commit either file or print their connection strings. The GitHub source branch remains `deploy-v2`; Neon database branches and Git branches are separate.
 
 ## Important known cleanup item
 
@@ -98,6 +113,8 @@ uploads/*
 ```
 
 Do not remove supplied legal/reference files. Do not copy secrets.
+
+Do not commit `.agents/`; it contains locally installed Neon agent skills. It is now ignored alongside `.neon`.
 
 ### 2. Finish functional frontend polish
 

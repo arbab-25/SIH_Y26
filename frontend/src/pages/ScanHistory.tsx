@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Clock, RefreshCw, Eye, AlertTriangle, CheckCircle, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Clock, Eye } from 'lucide-react';
 import { api } from '../utils/api';
 import { translations } from '../i18n/translations';
 import { ScanResult } from '../types';
@@ -15,11 +15,7 @@ export const ScanHistory: React.FC<ScanHistoryProps> = ({ onSelectScan, lang }) 
   const [loading, setLoading] = useState(false);
   const [rerunningId, setRerunningId] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchScans();
-  }, []);
-
-  const fetchScans = async () => {
+  const fetchScans = useCallback(async () => {
     setLoading(true);
     try {
       const res = await api.get('/scans?page=1&size=20');
@@ -29,14 +25,19 @@ export const ScanHistory: React.FC<ScanHistoryProps> = ({ onSelectScan, lang }) 
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    void fetchScans();
+  }, [fetchScans]);
 
   const handleRerun = async (id: string) => {
     setRerunningId(id);
     try {
       const res = await api.get(`/scans/${id}`);
       onSelectScan(res.data);
-    } catch (e) {
+    } catch (error) {
+      console.error('Failed to load selected scan:', error);
       alert('Failed to re-run scan.');
     } finally {
       setRerunningId(null);

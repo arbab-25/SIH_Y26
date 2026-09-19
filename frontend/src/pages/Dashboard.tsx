@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
 import { BarChart2, TrendingUp, FileCheck, Layers, RefreshCw, DatabaseZap } from 'lucide-react';
 import { api } from '../utils/api';
@@ -15,11 +15,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  useEffect(() => {
-    void fetchStats();
-  }, []);
-
-  const fetchStats = async () => {
+  const fetchStats = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
@@ -31,7 +27,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    void fetchStats();
+  }, [fetchStats]);
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">

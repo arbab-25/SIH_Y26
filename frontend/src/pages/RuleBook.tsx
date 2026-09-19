@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Search, BookOpen, Layers, Table, ChevronRight, Bookmark } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Search, Bookmark } from 'lucide-react';
 import { api } from '../utils/api';
 import { RuleItem } from '../types';
 import { translations } from '../i18n/translations';
@@ -22,15 +22,7 @@ export const RuleBook: React.FC<RuleBookProps> = ({ initialRule, lang }) => {
   const [activeScheduleTab, setActiveScheduleTab] = useState<'second' | 'table1' | 'fifth'>('second');
   const [scheduleData, setScheduleData] = useState<any>(null);
 
-  useEffect(() => {
-    fetchRules();
-  }, [searchQuery, selectedChapter]);
-
-  useEffect(() => {
-    fetchScheduleData(activeScheduleTab);
-  }, [activeScheduleTab]);
-
-  const fetchRules = async () => {
+  const fetchRules = useCallback(async () => {
     setLoading(true);
     try {
       let url = '/rules';
@@ -47,24 +39,32 @@ export const RuleBook: React.FC<RuleBookProps> = ({ initialRule, lang }) => {
           (r: RuleItem) => r.rule_number.toLowerCase() === initialRule.toLowerCase()
         );
         if (matched) setSelectedRule(matched);
-      } else if (res.data.length > 0 && !selectedRule) {
-        setSelectedRule(res.data[0]);
+      } else {
+        setSelectedRule((current) => current ?? res.data[0] ?? null);
       }
     } catch (err) {
       console.error('Failed to load rules:', err);
     } finally {
       setLoading(false);
     }
-  };
+  }, [initialRule, searchQuery, selectedChapter]);
 
-  const fetchScheduleData = async (type: string) => {
+  const fetchScheduleData = useCallback(async (type: string) => {
     try {
       const res = await api.get(`/schedules/${type}`);
       setScheduleData(res.data);
     } catch (err) {
       console.error('Failed to load schedule:', err);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    void fetchRules();
+  }, [fetchRules]);
+
+  useEffect(() => {
+    void fetchScheduleData(activeScheduleTab);
+  }, [activeScheduleTab, fetchScheduleData]);
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">

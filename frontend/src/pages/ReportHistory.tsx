@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { FileText, Download, Filter, Search, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Download, ChevronLeft, ChevronRight } from 'lucide-react';
 import { api } from '../utils/api';
 import { ReportItem } from '../types';
 import { translations } from '../i18n/translations';
@@ -17,11 +17,7 @@ export const ReportHistory: React.FC<ReportHistoryProps> = ({ onViewReport, lang
   const [verdictFilter, setVerdictFilter] = useState('');
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    fetchReports();
-  }, [page, verdictFilter]);
-
-  const fetchReports = async () => {
+  const fetchReports = useCallback(async () => {
     setLoading(true);
     try {
       let url = `/reports?page=${page}&size=10`;
@@ -34,7 +30,11 @@ export const ReportHistory: React.FC<ReportHistoryProps> = ({ onViewReport, lang
     } finally {
       setLoading(false);
     }
-  };
+  }, [page, verdictFilter]);
+
+  useEffect(() => {
+    void fetchReports();
+  }, [fetchReports]);
 
   const handleExportExcel = async () => {
     try {
@@ -68,7 +68,8 @@ export const ReportHistory: React.FC<ReportHistoryProps> = ({ onViewReport, lang
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
-    } catch (e) {
+    } catch (error) {
+      console.error('Failed to download report PDF:', error);
       alert('PDF download failed.');
     }
   };

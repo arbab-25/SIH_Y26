@@ -1,5 +1,5 @@
 import React from 'react';
-import { Camera, FileText, BookOpen, Clock, BarChart2, ShieldCheck, Settings } from 'lucide-react';
+import { Camera, FileText, BookOpen, Clock, BarChart2, ShieldCheck } from 'lucide-react';
 import { translations } from '../i18n/translations';
 
 interface SidebarProps {

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { ChevronDown, ChevronUp, Edit3, CheckCircle2, AlertTriangle, AlertCircle, ExternalLink, Shield } from 'lucide-react';
-import { ScanResult, ExtractedFieldItem, ViolationItem } from '../types';
+import { ChevronDown, ChevronUp, Edit3, CheckCircle2, AlertTriangle, AlertCircle, ExternalLink } from 'lucide-react';
+import { ScanResult, ExtractedFieldItem } from '../types';
 import { translations } from '../i18n/translations';
 import { api } from '../utils/api';
 

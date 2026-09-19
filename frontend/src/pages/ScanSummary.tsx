@@ -12,6 +12,19 @@ interface ScanSummaryProps {
   lang: 'en' | 'hi';
 }
 
+const ConfidenceTooltip = ({ active, payload }: { active?: boolean; payload?: Array<{ payload: { color: string; name: string; value: number; fields?: string[] } }> }) => {
+  if (!active || !payload?.length) return null;
+  const data = payload[0].payload;
+  return (
+    <div className="bg-slate-900 text-white p-3 rounded-xl shadow-xl text-xs max-w-xs z-50">
+      <p className="font-bold mb-1" style={{ color: data.color }}>{data.name}: {data.value} fields</p>
+      {data.fields?.length ? <div className="space-y-0.5 text-slate-300 text-[11px]">
+        {data.fields.map((field) => <div key={field}>• {field}</div>)}
+      </div> : null}
+    </div>
+  );
+};
+
 export const ScanSummary: React.FC<ScanSummaryProps> = ({
   scan,
   onViewDetailedAnalysis,
@@ -79,8 +92,8 @@ export const ScanSummary: React.FC<ScanSummaryProps> = ({
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
       }
-    } catch (err) {
-      console.error('Failed to download PDF:', err);
+    } catch (error) {
+      console.error('Failed to download PDF:', error);
       alert('Could not download PDF. Please check server logs.');
     } finally {
       setDownloadingPdf(false);
@@ -92,36 +105,14 @@ export const ScanSummary: React.FC<ScanSummaryProps> = ({
       try {
         const repRes = await api.post('/reports', { scan_id: scan.scan_id || scan.id });
         setReportNumber(repRes.data?.report_number);
-      } catch (e) {
-        console.error('Error generating report number:', e);
+      } catch (error) {
+        console.error('Error generating report number:', error);
       }
     }
     setReportModalOpen(true);
   };
 
   const pieData = scan.confidence_pie?.length > 0 ? scan.confidence_pie : [];
-
-  // Tooltip formatter for Recharts pie chart per §7.2
-  const CustomPieTooltip = ({ active, payload }: any) => {
-    if (active && payload && payload.length) {
-      const data = payload[0].payload;
-      return (
-        <div className="bg-slate-900 text-white p-3 rounded-xl shadow-xl text-xs max-w-xs z-50">
-          <p className="font-bold mb-1" style={{ color: data.color }}>
-            {data.name}: {data.value} fields
-          </p>
-          {data.fields && data.fields.length > 0 && (
-            <div className="space-y-0.5 text-slate-300 text-[11px]">
-              {data.fields.map((f: string, i: number) => (
-                <div key={i}>• {f}</div>
-              ))}
-            </div>
-          )}
-        </div>
-      );
-    }
-    return null;
-  };
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -257,7 +248,7 @@ export const ScanSummary: React.FC<ScanSummaryProps> = ({
                   <Pie data={pieData} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={4} dataKey="value">
                     {pieData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
                   </Pie>
-                  <Tooltip content={<CustomPieTooltip />} />
+                  <Tooltip content={<ConfidenceTooltip />} />
                 </PieChart>
               </ResponsiveContainer>
             </div>

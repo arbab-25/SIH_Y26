@@ -195,7 +195,8 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({ onScanComplete, lang, on
         });
         if (onOfflineQueued) onOfflineQueued();
         setErrorMessage(t.errorOfflineQueue);
-      } catch (err) {
+      } catch (error) {
+        console.error('Failed to queue offline scan:', error);
         setErrorMessage(t.errorOfflineFail);
       } finally {
         setLoading(false);

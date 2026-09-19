@@ -59,3 +59,5 @@ frontend/src/reticle-dev.ts
 # ── Duplicate/scratch folders ─────────────────────
 ORIGNAL/
 .recovery-node-modules-incomplete/
+.agents/
+.neon
