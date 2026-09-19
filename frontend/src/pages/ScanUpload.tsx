@@ -9,18 +9,14 @@ interface ScanUploadProps {
   onScanComplete: (result: ScanResult) => void;
   lang: 'en' | 'hi';
   currentUser?: User | null;
-  guestScanCount?: number;
   onRequireLogin?: (notice?: string) => void;
   onOfflineQueued?: () => void;
 }
-
-const GUEST_FREE_SCANS = 3;
 
 export const ScanUpload: React.FC<ScanUploadProps> = ({
   onScanComplete,
   lang,
   currentUser,
-  guestScanCount = 0,
   onRequireLogin,
   onOfflineQueued,
 }) => {
@@ -191,12 +187,12 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({
       return;
     }
 
-    // Compulsory sign-in after the 3rd guest scan per §6
-    if (!currentUser && guestScanCount >= GUEST_FREE_SCANS) {
+    // Guest mode removed: scanning requires a signed-in inspector account
+    if (!currentUser) {
       onRequireLogin?.(
         lang === 'hi'
-          ? `आपने ${GUEST_FREE_SCANS} मुफ़्त स्कैन कर लिए हैं। जारी रखने के लिए साइन इन करें।`
-          : `You've used all ${GUEST_FREE_SCANS} free guest scans. Please sign in to continue scanning.`
+          ? 'स्कैन शुरू करने के लिए कृपया साइन इन करें।'
+          : 'Please sign in to scan a label. Use the Sign In button at the top right.'
       );
       return;
     }
@@ -279,9 +275,7 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({
             <div className="flex items-center justify-center gap-2 px-3.5 py-2 bg-amber-50 text-amber-800 border border-amber-200 rounded-xl text-xs font-bold">
               <LogIn size={15} />
               <span>
-                {lang === 'hi'
-                  ? `अतिथि मोड (स्कैन ${Math.min(guestScanCount + 1, GUEST_FREE_SCANS)}/${GUEST_FREE_SCANS})`
-                  : `Guest Mode (Scan ${Math.min(guestScanCount + 1, GUEST_FREE_SCANS)}/${GUEST_FREE_SCANS})`}
+                {lang === 'hi' ? 'स्कैन करने के लिए साइन इन करें' : 'Sign in required to scan'}
               </span>
             </div>
           )}
@@ -459,10 +453,10 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({
               <RefreshCw size={18} className="animate-spin text-cyan-400" />
               <span>{t.analyzing}</span>
             </>
-          ) : !currentUser && guestScanCount >= GUEST_FREE_SCANS ? (
+          ) : !currentUser ? (
             <>
               <LogIn size={18} />
-              <span>{lang === 'hi' ? 'साइन इन करें और स्कैन जारी रखें' : 'Sign in to continue scanning'}</span>
+              <span>{lang === 'hi' ? 'स्कैन के लिए साइन इन करें' : 'Sign in to scan'}</span>
             </>
           ) : (
             <>

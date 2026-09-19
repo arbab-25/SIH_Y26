@@ -5,6 +5,7 @@ import io
 from PIL import Image, ImageDraw
 from httpx import AsyncClient, ASGITransport
 from app.main import app
+from app.services.auth_service import create_access_token
 
 
 def create_mock_label_image():
@@ -35,7 +36,7 @@ async def test_full_scan_report_workflow():
             "package_type": "retail"
         }
         headers = {
-            "X-Guest-Device-Id": "test-device-uuid-12345"
+            "Authorization": "Bearer " + create_access_token("00000000-0000-0000-0000-000000000001", "INSPECTOR")
         }
 
         scan_resp = await ac.post("/api/v1/scans", files=files, data=data, headers=headers)
@@ -55,13 +56,14 @@ async def test_full_scan_report_workflow():
         # 3. Test Field Override (Inspector amends a field)
         patch_resp = await ac.patch(
             f"/api/v1/scans/{scan_id}/fields/net_quantity_value",
-            json={"new_value": "100.0", "reason": "Verified on physical packaging"}
+            json={"new_value": "100.0", "reason": "Verified on physical packaging"},
+            headers=headers,
         )
         # If field exists or is overridden
         assert patch_resp.status_code in (200, 404)
 
         # 4. Generate Formal Report
-        rep_resp = await ac.post("/api/v1/reports", json={"scan_id": scan_id})
+        rep_resp = await ac.post("/api/v1/reports", json={"scan_id": scan_id}, headers=headers)
         assert rep_resp.status_code == 201
         rep_data = rep_resp.json()
         report_number = rep_data["report_number"]
@@ -84,12 +86,13 @@ async def test_full_scan_report_workflow():
             json={
                 "reason": "Suspected non-compliance",
                 "remarks": "Net quantity font height borderline under Rule 7"
-            }
+            },
+            headers=headers,
         )
         assert email_resp.status_code == 200
         assert email_resp.json()["status"] in ("sent", "failed")
 
-        # 8. List Scans (same guest device header as the scan creation)
+        # 8. List Scans (authenticated as the same inspector)
         list_resp = await ac.get("/api/v1/scans?page=1&size=10", headers=headers)
         assert list_resp.status_code == 200
         assert len(list_resp.json()["items"]) >= 1

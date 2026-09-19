@@ -58,7 +58,7 @@ cd ../backend && python -m pytest
 
 ## Security posture
 
-- Rate limiting on scans, login and registration; guest accounts get 3 free scans then must sign in.
+- Rate limiting on scans, login and registration; guest mode is removed — sign-in is required for every scan, report, and history view.
 - Upload hardening: magic-byte validation, 10 MB cap, max 5 images per scan, EXIF stripped.
 - Security headers on every API response: CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy.
 - CORS restricted to configured origins; API docs (`/docs`) disabled unless `DEBUG=true`.

@@ -13,7 +13,7 @@ export const translations = {
     navHistory: "Scan History",
     navDashboard: "Dashboard",
     navSettings: "Settings",
-    guestLimitReached: "Free guest scans are used up. Sign in to keep scanning and to keep your records permanent.",
+    signInRequired: "Sign in to scan labels and manage reports.",
 
     // Auth
     login: "Sign In",
@@ -24,8 +24,7 @@ export const translations = {
     passwordPlaceholder: "Password",
     demoCredentialsTip: "Demo Inspector: inspector@demo.gov.in / Demo@1234",
     signInAction: "Sign In",
-    guestBadge: "Guest Mode (Scan 1/3)",
-    freeScanNotice: "Guest scan mode. Sign in for permanent records & bulk export.",
+    signInBadge: "Sign in required",
 
     // Scan Page
     scanTitle: "Legal Metrology Compliance Check",
@@ -145,7 +144,7 @@ export const translations = {
     navHistory: "स्कैन इतिहास",
     navDashboard: "डैशबोर्ड",
     navSettings: "सेटिंग्स",
-    guestLimitReached: "मुफ़्त अतिथि स्कैन समाप्त हो गए हैं। स्कैन जारी रखने और रिकॉर्ड स्थायी रखने के लिए साइन इन करें।",
+    signInRequired: "स्कैन करने के लिए कृपया साइन इन करें।",
 
     // Auth
     login: "लॉग इन",
@@ -156,8 +155,7 @@ export const translations = {
     passwordPlaceholder: "पासवर्ड",
     demoCredentialsTip: "डेमो निरीक्षक: inspector@demo.gov.in / Demo@1234",
     signInAction: "प्रवेश करें",
-    guestBadge: "अतिथि मोड (स्कैन 1/3)",
-    freeScanNotice: "अतिथि स्कैन मोड। स्थायी रिकॉर्ड और निर्यात के लिए लॉगिन करें।",
+    signInBadge: "स्कैन के लिए साइन इन आवश्यक",
 
     // Scan Page
     scanTitle: "विधिक माप विज्ञान अनुपालन जाँच",

@@ -46,7 +46,7 @@ def export_reports_to_excel(reports_data: List[dict]) -> bytes:
             r.get("verdict", "NEEDS_REVIEW"),
             r.get("compliance_score", 0.0),
             r.get("avg_ocr_confidence", 0.0),
-            r.get("inspector_name", "Guest"),
+            r.get("inspector_name", "Officer on Duty"),
             r.get("violations_count", 0),
         ])
 

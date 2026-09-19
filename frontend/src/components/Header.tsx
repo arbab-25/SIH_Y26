@@ -6,7 +6,6 @@ interface HeaderProps {
   lang: 'en' | 'hi';
   onToggleLang: () => void;
   currentUser: any;
-  guestScanCount?: number;
   onOpenLogin: () => void;
   onLogout: () => void;
   onOpenHelp: () => void;
@@ -17,7 +16,6 @@ export const Header: React.FC<HeaderProps> = ({
   lang,
   onToggleLang,
   currentUser,
-  guestScanCount = 0,
   onOpenLogin,
   onLogout,
   onOpenHelp,
@@ -53,13 +51,6 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Right Controls */}
       <div className="flex items-center gap-2 sm:gap-4">
-        {/* Guest scan counter per §6 — sign-in required after 3rd scan */}
-        {!currentUser && (
-          <div className="flex items-center gap-1 bg-amber-50 border border-amber-200 text-amber-800 text-xs px-2.5 py-1 rounded-full font-medium">
-            {t.guestBadge.replace('1/3', `${Math.min(guestScanCount + 1, 3)}/3`)}
-          </div>
-        )}
-
         {/* Offline Sync Badge per §12 */}
         {pendingSyncCount > 0 && (
           <div className="flex items-center gap-1 bg-amber-50 border border-amber-200 text-amber-800 text-xs px-2.5 py-1 rounded-full font-medium animate-pulse">

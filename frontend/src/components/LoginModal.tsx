@@ -194,7 +194,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
         {/* Scrollable Body */}
         <div className="overflow-y-auto flex-1">
-          {/* Contextual notice (e.g. guest limit / report sign-in prompt) */}
+          {/* Contextual notice (e.g. report sign-in prompt / session required) */}
           {notice && !error && !successMsg && (
             <div className="mx-5 mt-4 flex items-start gap-2.5 p-3.5 border rounded-xl text-xs bg-cyan-50 border-cyan-200 text-cyan-900">
               <Shield size={16} className="text-[#0E7490] shrink-0 mt-0.5" />

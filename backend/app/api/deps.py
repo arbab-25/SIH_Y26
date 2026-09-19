@@ -1,9 +1,11 @@
-"""Auth dependencies — JWT token extraction and user resolution."""
+"""Auth dependencies — JWT token extraction and user resolution.
 
-from fastapi import Depends, HTTPException, Header, Request
+Guest mode has been removed: every inspector signs in with a real account.
+"""
+
+from fastapi import Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Optional
 
 from app.database import get_db
 from app.services.auth_service import decode_access_token, get_user_by_id
@@ -13,22 +15,8 @@ from app.models.user import User, UserRole
 security = HTTPBearer(auto_error=False)
 
 
-async def get_current_user_optional(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
-    db: AsyncSession = Depends(get_db),
-) -> Optional[User]:
-    """Returns the current user if authenticated, None otherwise."""
-    if not credentials:
-        return None
-    payload = decode_access_token(credentials.credentials)
-    if not payload:
-        return None
-    user = await get_user_by_id(db, payload["sub"])
-    return user
-
-
 async def get_current_user(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
     db: AsyncSession = Depends(get_db),
 ) -> User:
     """Returns the current user. Raises 401 if not authenticated."""
@@ -57,11 +45,3 @@ async def require_senior_or_admin(user: User = Depends(get_current_user)) -> Use
     if user.role not in (UserRole.SENIOR_OFFICER, UserRole.ADMIN):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
     return user
-
-
-def get_guest_device_id(request: Request) -> Optional[str]:
-    """Extract guest device ID from header or cookie."""
-    device_id = request.headers.get("X-Guest-Device-Id")
-    if not device_id:
-        device_id = request.cookies.get("guest_device_id")
-    return device_id

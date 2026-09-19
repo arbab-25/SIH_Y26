@@ -90,6 +90,20 @@ def pytest_configure(config):
                     state="Delhi",
                     is_active=True,
                 ))
+                # Deterministic test inspector matching the fixed UUID used by
+                # integration tests for their bearer tokens (guest mode removed:
+                # every scan request must carry an Authorization header).
+                session.add(User(
+                    id=_uuid.UUID("00000000-0000-0000-0000-000000000001"),
+                    name="Integration Inspector",
+                    email="integration@test.gov.in",
+                    mobile="7777777777",
+                    password_hash=hash_password("Integration@1234"),
+                    role=UserRole.INSPECTOR,
+                    designation="Inspector (integration tests)",
+                    office="Test Office",
+                    is_active=True,
+                ))
                 await session.commit()
 
         asyncio.run(_prepare())

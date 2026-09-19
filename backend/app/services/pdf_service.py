@@ -58,7 +58,7 @@ def generate_compliance_pdf(
     # Meta Info Bar
     rep_num = report_data.get("report_number", f"CMD-{datetime.utcnow().strftime('%Y%m%d')}-001")
     gen_at = report_data.get("generated_at", datetime.utcnow().strftime("%d-%b-%Y %H:%M UTC"))
-    inspector = report_data.get("inspector_name", "Officer on Duty (Guest)")
+    inspector = report_data.get("inspector_name", "Officer on Duty")
     score = report_data.get("compliance_score", 0.0)
     avg_conf = report_data.get("avg_ocr_confidence", 0.0)
 

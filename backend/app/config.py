@@ -66,10 +66,8 @@ class Settings(BaseSettings):
     SECURE_COOKIES: bool = True
     ENVIRONMENT: str = "development"
 
-    # Rate limiting
+    # Rate limiting (guest mode removed: all scans require a signed-in inspector)
     RATE_LIMIT_SCANS_PER_MIN: int = 30
-    GUEST_FREE_SCAN_LIMIT: int = 3
-    GUEST_FREE_SCANS: int = 3
 
     # Uploads
     MAX_IMAGES_PER_SCAN: int = 5

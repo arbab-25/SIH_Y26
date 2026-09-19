@@ -37,11 +37,6 @@ export function App() {
 
   const t = translations[lang];
 
-  // Guest free-scan tracking: sign-in becomes compulsory after the 3rd scan per §6
-  const getGuestScanCount = useCallback((): number => {
-    return parseInt(localStorage.getItem('cmd_guest_scans') || '0', 10) || 0;
-  }, []);
-
   const openLogin = useCallback((notice?: string) => {
     setLoginNotice(notice || null);
     setLoginModalOpen(true);
@@ -62,13 +57,18 @@ export function App() {
     // Check offline sync queue
     getPendingScansCount().then(setPendingSyncCount);
 
-    // Listen for guest free scan limit trigger per §6 (backend 403)
+    // 401 from any API call (expired/missing session) opens the sign-in modal.
+    // Guest mode removed: scanning, reports and history all require sign-in.
     const handleTriggerLogin = () => {
-      openLogin(t.guestLimitReached);
+      openLogin(
+        lang === 'hi'
+          ? 'स्कैन करने के लिए कृपया साइन इन करें।'
+          : 'Please sign in to scan labels and manage reports.'
+      );
     };
     window.addEventListener('cmd_trigger_login', handleTriggerLogin);
     return () => window.removeEventListener('cmd_trigger_login', handleTriggerLogin);
-  }, [getPendingScansCount, openLogin, t.guestLimitReached]);
+  }, [getPendingScansCount, openLogin, lang]);
 
   const handleToggleLang = () => {
     const next = lang === 'en' ? 'hi' : 'en';
@@ -83,9 +83,6 @@ export function App() {
 
   const handleScanCompleted = (result: ScanResult) => {
     setCurrentScan(result);
-    if (!currentUser) {
-      localStorage.setItem('cmd_guest_scans', String(getGuestScanCount() + 1));
-    }
     // Compact summary now appears directly below the Scan / Upload page after each scan
     setActiveTab('scan');
   };
@@ -95,8 +92,6 @@ export function App() {
     setActiveTab('rulebook');
   };
 
-  const guestScanCount = getGuestScanCount();
-
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-[#172033] flex flex-col font-sans">
       {/* Top Header per §4 */}
@@ -104,7 +99,6 @@ export function App() {
         lang={lang}
         onToggleLang={handleToggleLang}
         currentUser={currentUser}
-        guestScanCount={guestScanCount}
         onOpenLogin={() => openLogin()}
         onLogout={handleLogout}
         onOpenHelp={() => setHelpDrawerOpen(true)}
@@ -123,7 +117,6 @@ export function App() {
                 onScanComplete={handleScanCompleted}
                 lang={lang}
                 currentUser={currentUser}
-                guestScanCount={guestScanCount}
                 onRequireLogin={(notice) => openLogin(notice)}
                 onOfflineQueued={() => getPendingScansCount().then(setPendingSyncCount)}
               />

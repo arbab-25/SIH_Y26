@@ -14,7 +14,7 @@ from app.database import get_db
 from app.models.user import User
 from app.models.scan import Scan
 from app.models.report import Report
-from app.api.deps import get_current_user_optional
+from app.api.deps import get_current_user
 from app.services.pdf_service import generate_compliance_pdf
 from app.services.email_service import send_report_email
 from app.services.excel_service import export_reports_to_excel
@@ -25,10 +25,10 @@ router = APIRouter(prefix="/reports", tags=["Reports"])
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_report(
     payload: dict,
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Generate formal Legal Metrology compliance report and compile PDF."""
+    """Generate formal Legal Metrology compliance report and compile PDF (auth required)."""
     scan_id_str = payload.get("scan_id")
     if not scan_id_str:
         raise HTTPException(status_code=400, detail="scan_id is required")
@@ -74,7 +74,7 @@ async def create_report(
     report_payload = {
         "report_number": report_number,
         "generated_at": datetime.utcnow().strftime("%d-%b-%Y %H:%M UTC"),
-        "inspector_name": current_user.name if current_user else "Officer on Duty (Guest)",
+        "inspector_name": current_user.name,
         "verdict": scan.verdict.value if scan.verdict else "NEEDS_REVIEW",
         "compliance_score": float(scan.compliance_score or 0.0),
         "avg_ocr_confidence": float(scan.avg_ocr_confidence or 0.0),
@@ -115,7 +115,7 @@ async def create_report(
         scan_id=scan.id,
         report_number=report_number,
         pdf_url=f"/api/v1/reports/{report_number}/pdf",
-        generated_by=current_user.id if current_user else None,
+        generated_by=current_user.id,
         share_token=str(uuid.uuid4()),
         created_at=datetime.utcnow()
     )
@@ -246,7 +246,7 @@ async def download_report_pdf(report_id_or_number: str, db: AsyncSession = Depen
 async def email_report(
     report_id_or_number: str,
     payload: dict = {},
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """'Report this Product' via email with formal PDF and cited violations per §11."""
@@ -275,7 +275,7 @@ async def email_report(
     product_name = scan.product.product_name if scan and scan.product else "Pre-packaged Product"
     verdict = scan.verdict.value if scan and scan.verdict else "NEEDS_REVIEW"
     score = float(scan.compliance_score or 0.0) if scan else 0.0
-    inspector_name = current_user.name if current_user else "Enforcement Officer (Guest)"
+    inspector_name = current_user.name
 
     violations_data = [
         {

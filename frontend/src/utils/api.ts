@@ -7,16 +7,6 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ||
     ? 'https://codemaze-api-m6f0.onrender.com/api/v1'
     : 'http://localhost:8000/api/v1');
 
-// Generate or retrieve persistent anonymous device ID for guest scan tracking per §6
-export const getDeviceId = (): string => {
-  let devId = localStorage.getItem('cmd_device_id');
-  if (!devId) {
-    devId = 'cmd-' + Math.random().toString(36).substring(2, 11) + '-' + Date.now();
-    localStorage.setItem('cmd_device_id', devId);
-  }
-  return devId;
-};
-
 export const api = axios.create({
   baseURL: API_BASE_URL,
   headers: {
@@ -24,22 +14,22 @@ export const api = axios.create({
   }
 });
 
-// Interceptor to inject Bearer Token and Guest Device ID
+// Interceptor to inject Bearer Token
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('cmd_auth_token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
-  config.headers['X-Guest-Device-Id'] = getDeviceId();
   return config;
 });
 
-// Interceptor to capture guest free scan limits (403)
+// Global handler for expired/missing sessions: the app listens for this event
+// and shows the sign-in modal (guest mode has been removed — every scan,
+// report and history view requires a signed-in inspector account).
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response && error.response.status === 403) {
-      // Trigger login prompt event for guest users
+    if (error.response && error.response.status === 401) {
       window.dispatchEvent(new CustomEvent('cmd_trigger_login'));
     }
     return Promise.reject(error);

@@ -18,7 +18,7 @@ from app.models.product import Product
 from app.models.extracted_field import ExtractedField
 from app.models.violation import Violation, Severity
 from app.models.field_override import FieldOverride
-from app.api.deps import get_current_user, get_current_user_optional, get_guest_device_id
+from app.api.deps import get_current_user
 from app.services.ocr_service import run_ocr
 from app.services.field_extractors import extract_fields_from_ocr
 from app.services.rule_engine import evaluate_product_compliance
@@ -38,30 +38,18 @@ async def create_scan(
     pdp_height_cm: Optional[float] = Form(None),
     pdp_width_cm: Optional[float] = Form(None),
     measured_glyph_height_mm: Optional[float] = Form(None),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Upload product label images and run full Legal Metrology compliance scan."""
+    """Upload product label images and run full Legal Metrology compliance scan.
+
+    Authentication is required — guest mode has been removed; every scan is
+    attributed to a signed-in inspector account.
+    """
     start_time = time.time()
 
-    # 1. Guest scans limit check per §6 (Hidden from UI, 3 free scans before login required)
-    guest_device_id = None
-    if not current_user:
-        guest_device_id = get_guest_device_id(request) or str(uuid.uuid4())
-        # Count past scans for this guest device
-        res = await db.execute(
-            select(func.count(Scan.id)).where(Scan.guest_device_id == guest_device_id)
-        )
-        count = res.scalar() or 0
-        if count >= settings.GUEST_FREE_SCANS:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Free guest scans limit reached. Please sign in to continue."
-            )
-
-    # 1b. Rate limiting (30/min per user or guest)
-    identifier = str(current_user.id) if current_user else guest_device_id
-    check_rate_limit(identifier, max_requests=30, window_seconds=60)
+    # Rate limiting (30/min per user)
+    check_rate_limit(str(current_user.id), max_requests=30, window_seconds=60)
 
     # 2. Save uploaded images (secure upload handling: count + size + magic-byte checks)
     if len(images) > settings.MAX_IMAGES_PER_SCAN:
@@ -101,12 +89,12 @@ async def create_scan(
             
         saved_image_paths.append(target_path)
 
-    # 3. Create Scan record
+    # 3. Create Scan record (always owned by the signed-in inspector)
     scan_id = uuid.uuid4()
     scan = Scan(
         id=scan_id,
-        user_id=current_user.id if current_user else None,
-        guest_device_id=guest_device_id,
+        user_id=current_user.id,
+        guest_device_id=None,
         image_urls=saved_image_paths,
         package_type=package_type,
         category=category,
@@ -339,10 +327,14 @@ async def list_scans(
     verdict: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
     q: Optional[str] = Query(None),
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Paginated list of scans with filtering per §7.6 & §7.7."""
+    """Paginated list of scans with filtering per §7.6 & §7.7.
+
+    Authentication required. Inspectors see only their own scans;
+    Senior Officers and Admins see everything.
+    """
     offset = (page - 1) * size
     stmt = select(Scan).options(selectinload(Scan.product))
 
@@ -351,16 +343,10 @@ async def list_scans(
     if category:
         stmt = stmt.where(Scan.category.ilike(f"%{category}%"))
 
-    # Data isolation: inspectors see only their own scans; guests see only their device's scans.
-    # Admins/Senior Officers see everything.
-    if current_user and current_user.role.value == "INSPECTOR":
+    # Data isolation: inspectors see only their own scans; admins/senior officers see all.
+    sees_all = current_user.role.value in ("ADMIN", "SENIOR_OFFICER")
+    if not sees_all:
         stmt = stmt.where(Scan.user_id == current_user.id)
-    elif not current_user:
-        device_id = get_guest_device_id(request)
-        if device_id:
-            stmt = stmt.where(Scan.guest_device_id == device_id)
-        else:
-            stmt = stmt.where(Scan.id == None)  # no device id -> no guest history
 
     stmt = stmt.order_by(desc(Scan.created_at)).offset(offset).limit(size)
     res = await db.execute(stmt)
@@ -368,14 +354,8 @@ async def list_scans(
 
     # Total count (mirror the same visibility filter)
     count_stmt = select(func.count(Scan.id))
-    if current_user and current_user.role.value == "INSPECTOR":
+    if not sees_all:
         count_stmt = count_stmt.where(Scan.user_id == current_user.id)
-    elif not current_user:
-        device_id = get_guest_device_id(request)
-        if device_id:
-            count_stmt = count_stmt.where(Scan.guest_device_id == device_id)
-        else:
-            count_stmt = count_stmt.where(Scan.id == None)
     if verdict:
         count_stmt = count_stmt.where(Scan.verdict == Verdict(verdict.upper()))
     total = (await db.execute(count_stmt)).scalar() or 0
@@ -408,10 +388,13 @@ async def override_field(
     scan_id: uuid.UUID,
     field_key: str,
     payload: dict,
-    current_user: User = Depends(get_current_user_optional),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Inspector manual override ('Mark as correct' / 'Correct this value') per §7.3."""
+    """Inspector manual override ('Mark as correct' / 'Correct this value') per §7.3.
+
+    Authentication required; overrides are attributed to the signed-in inspector.
+    """
     new_value = payload.get("new_value")
     reason = payload.get("reason", "Manual inspector verification against physical sample")
 
@@ -438,7 +421,7 @@ async def override_field(
         old_value=old_value,
         new_value=str(new_value),
         reason=reason,
-        overridden_by=current_user.id if current_user else None,
+        overridden_by=current_user.id,
         created_at=datetime.utcnow()
     )
     db.add(override)
