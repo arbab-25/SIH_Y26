@@ -1,0 +1,61 @@
+# ── Python ────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+build/
+.eggs/
+venv/
+.venv/
+env/
+
+# ── Databases (never commit local SQLite) ─────────
+*.db
+*.sqlite
+*.sqlite3
+
+# ── Node ──────────────────────────────────────────
+node_modules/
+dist/
+.cache/
+
+# ── Environment secrets ───────────────────────────
+.env
+.env.local
+.env.*.local
+
+# ── Uploads & generated files (user data) ─────────
+backend/uploads/
+backend/temp/
+backend/**/uploads/
+backend/backend/
+ml/ml/
+
+# ── Test / Coverage ───────────────────────────────
+htmlcov/
+.coverage
+coverage.xml
+*.cover
+.pytest_cache/
+
+# ── IDE ───────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── OS ────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Docker overrides ──────────────────────────────
+docker-compose.override.yml
+
+# ── Reticle dev tool (not for production) ─────────
+.reticle.json
+frontend/src/reticle-dev.ts
+
+# ── Duplicate/scratch folders ─────────────────────
+ORIGNAL/
+.recovery-node-modules-incomplete/

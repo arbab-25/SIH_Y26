@@ -1,0 +1,58 @@
+# render.yaml — CODE MAZE monorepo deployment config
+# Render reads this file automatically when you connect the GitHub repo.
+# Docs: https://render.com/docs/yaml-spec
+
+services:
+  # ── Backend: FastAPI API (Docker) ─────────────────────────────────────────
+  - name: codemaze-api
+    type: web
+    runtime: docker
+    rootDir: ./backend
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: DATABASE_URL
+        sync: false          # You paste this in the Render dashboard (Neon PostgreSQL async URL)
+      - key: DATABASE_URL_SYNC
+        sync: false          # Sync version for Alembic (pg8000 driver)
+      - key: JWT_SECRET
+        generateValue: true  # Render auto-generates a secure random value
+      - key: CORS_ORIGINS
+        value: https://codemaze-frontend.onrender.com  # Update after frontend deploys
+      - key: STORAGE_BACKEND
+        value: local
+      - key: OCR_ENGINE
+        value: tesseract
+      - key: OCR_CONFIDENCE_THRESHOLD
+        value: "0.75"
+      - key: REPORT_RECIPIENT_EMAIL
+        value: arbab.momin.2008@gmail.com
+      - key: SMTP_HOST
+        value: smtp-relay.brevo.com
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM_EMAIL
+        value: noreply@codemaze.app
+      - key: DEBUG
+        value: "false"
+
+
+  # ── Frontend: React/Vite Static Site ──────────────────────────────────────
+  - name: codemaze-frontend
+    type: web
+    runtime: static
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    rootDir: ./frontend
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html   # SPA fallback — all routes served by index.html
+    envVars:
+      - key: VITE_API_BASE_URL
+        value: https://codemaze-api-hz92.onrender.com/api/v1
