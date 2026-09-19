@@ -152,7 +152,7 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({ onScanComplete, lang, on
     for (let i = 0; i < filesList.length; i++) {
       const file = filesList[i];
       if (!file.type.startsWith('image/')) {
-        setErrorMessage('Only image files (JPG, PNG, WEBP) are supported.');
+        setErrorMessage(t.errorOnlyImages);
         continue;
       }
       const compressed = await compressImage(file);
@@ -213,7 +213,7 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({ onScanComplete, lang, on
 
   const handleStartAnalysis = async () => {
     if (selectedFiles.length === 0) {
-      setErrorMessage('Please capture or select at least one product label photo.');
+      setErrorMessage(t.errorNeedPhoto);
       return;
     }
 
@@ -232,9 +232,9 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({ onScanComplete, lang, on
           timestamp: Date.now(),
         });
         if (onOfflineQueued) onOfflineQueued();
-        setErrorMessage('Device is currently offline. Scan saved to offline queue and will auto-sync when reconnected.');
+        setErrorMessage(t.errorOfflineQueue);
       } catch (err) {
-        setErrorMessage('Failed to queue offline scan.');
+        setErrorMessage(t.errorOfflineFail);
       } finally {
         setLoading(false);
         setActiveStep(0);
@@ -288,7 +288,7 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({ onScanComplete, lang, on
           className="flex items-center gap-2 px-3.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 rounded-xl text-xs font-bold transition-colors shrink-0 min-h-[44px]"
         >
           <Sparkles size={16} className="text-amber-600" />
-          <span>Load Biscuits Test Sample</span>
+          <span>{t.loadTestSample}</span>
         </button>
       </div>
 
@@ -322,7 +322,7 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({ onScanComplete, lang, on
           </div>
           <h3 className="font-bold text-base text-[#12355B]">{t.captureCamera}</h3>
           <p className="text-xs text-slate-500 text-center mt-1 max-w-xs">
-            Directly photograph front, back, or side packaging panels using your mobile device.
+            {t.cameraDesc}
           </p>
         </div>
 
@@ -356,7 +356,7 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({ onScanComplete, lang, on
         <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
           <div className="flex items-center justify-between mb-3">
             <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-              Captured Packaging Panels ({previewUrls.length})
+              {t.capturedPanels} ({previewUrls.length})
             </span>
             <button
               onClick={() => {
@@ -365,7 +365,7 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({ onScanComplete, lang, on
               }}
               className="text-xs text-rose-600 hover:underline font-semibold"
             >
-              Clear All
+              {t.clearAll}
             </button>
           </div>
           <div className="flex gap-3 overflow-x-auto pb-2">
@@ -373,7 +373,7 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({ onScanComplete, lang, on
               <div key={i} className="relative h-28 w-28 shrink-0 rounded-xl overflow-hidden border border-slate-200 group">
                 <img src={url} alt={`Panel ${i + 1}`} className="h-full w-full object-cover" />
                 <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-bold">
-                  Panel {i + 1}
+                  {t.panelNum} {i + 1}
                 </div>
               </div>
             ))}
@@ -385,7 +385,7 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({ onScanComplete, lang, on
       <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
         <h3 className="text-sm font-bold text-[#12355B] uppercase tracking-wider flex items-center gap-2">
           <Layers size={16} className="text-[#0E7490]" />
-          Inspection Parameters & Scope
+          {t.inspectionScope}
         </h3>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -425,26 +425,26 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({ onScanComplete, lang, on
         {/* Optional Dimensions for Rule 7(2) letter height check */}
         <div className="pt-3 border-t border-slate-100">
           <p className="text-xs font-bold text-slate-600 mb-2">
-            Optional: Packaging Dimensions for Rule 7(2) Minimum Letter Height Table-I
+            {t.optionalDimensionsTitle}
           </p>
           <div className="grid grid-cols-3 gap-3">
             <input
               type="number"
-              placeholder="PDP Height (cm)"
+              placeholder={t.pdpHeight}
               value={pdpHeight}
               onChange={(e) => setPdpHeight(e.target.value)}
               className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:bg-white focus:border-[#0E7490]"
             />
             <input
               type="number"
-              placeholder="PDP Width (cm)"
+              placeholder={t.pdpWidth}
               value={pdpWidth}
               onChange={(e) => setPdpWidth(e.target.value)}
               className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:bg-white focus:border-[#0E7490]"
             />
             <input
               type="number"
-              placeholder="Glyph Height (mm)"
+              placeholder={t.glyphHeight}
               value={glyphHeight}
               onChange={(e) => setGlyphHeight(e.target.value)}
               className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:bg-white focus:border-[#0E7490]"
@@ -476,7 +476,7 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({ onScanComplete, lang, on
       {loading && (
         <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm animate-fade-in">
           <div className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4 text-center">
-            Deterministic Pipeline Execution
+            {t.deterministicPipeline}
           </div>
           <div className="grid grid-cols-4 gap-2">
             {[
@@ -495,7 +495,7 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({ onScanComplete, lang, on
                     : 'bg-slate-50 border-slate-200 text-slate-400'
                 }`}
               >
-                <div className="text-xs font-bold">Step {st.num}</div>
+                <div className="text-xs font-bold">{t.stepNum} {st.num}</div>
                 <div className="text-[11px] truncate mt-0.5">{st.label}</div>
               </div>
             ))}
@@ -528,7 +528,7 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({ onScanComplete, lang, on
               ></button>
             </div>
           </div>
-          <p className="text-white text-sm font-bold mt-4">Align the label inside the frame and tap to capture</p>
+          <p className="text-white text-sm font-bold mt-4">{t.alignLabel}</p>
         </div>
       )}
     </div>

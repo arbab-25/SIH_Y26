@@ -68,7 +68,7 @@ export function App() {
 
   const handleScanCompleted = (result: ScanResult) => {
     setCurrentScan(result);
-    setActiveTab('summary');
+    setActiveTab('analysis'); // Go directly to Detailed Analysis per user request
   };
 
   const handleNavigateToRule = (ruleRef: string) => {
