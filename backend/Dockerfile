@@ -16,6 +16,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libcairo2 \
     libglib2.0-0 \
     shared-mime-info \
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxcb1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
