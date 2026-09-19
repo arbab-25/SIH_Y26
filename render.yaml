@@ -49,7 +49,6 @@ services:
     buildCommand: npm install && npm run build
     staticPublishPath: ./dist
     rootDir: ./frontend
-    plan: free
     routes:
       - type: rewrite
         source: /*
