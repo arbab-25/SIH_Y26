@@ -11,6 +11,8 @@ Create a PostgreSQL database and provide:
 - `DATABASE_URL`: runtime SQLAlchemy connection string
 - `DATABASE_URL_SYNC`: migration-compatible connection string
 
+For Render, copy the connection string from Neon **Connection Details** and paste only that string into each Render secret's **Value** field. Do not paste `DATABASE_URL=` or `DATABASE_URL_SYNC=` as part of either value. The runtime URL can be the standard Neon pooled `postgresql://…` URL; CODE MAZE converts it to SQLAlchemy's asyncpg dialect internally. The sync URL is used by Alembic.
+
 Run the Alembic migration and seed workflow from `backend/` before enabling production scans.
 
 ## Render

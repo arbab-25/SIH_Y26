@@ -1,5 +1,6 @@
 """Application configuration loaded from environment variables."""
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 from typing import Optional
 import os
@@ -55,6 +56,30 @@ class Settings(BaseSettings):
     RATE_LIMIT_SCANS_PER_MIN: int = 30
     GUEST_FREE_SCAN_LIMIT: int = 3
     GUEST_FREE_SCANS: int = 3
+
+    @field_validator("DATABASE_URL", "DATABASE_URL_SYNC", mode="before")
+    @classmethod
+    def validate_database_url(cls, value: str) -> str:
+        """Reject copied dotenv assignments and placeholder URLs before SQLAlchemy starts."""
+        url = str(value).strip()
+        if url.startswith("DATABASE_URL=") or url.startswith("DATABASE_URL_SYNC="):
+            raise ValueError(
+                "Set the Render environment variable to the connection-string value only; "
+                "do not include DATABASE_URL= or DATABASE_URL_SYNC=."
+            )
+        if "YOUR-NEON-HOST" in url or "USER:PASSWORD" in url:
+            raise ValueError(
+                "Replace the example database URL with the real Neon connection string from Neon Connection Details."
+            )
+        return url
+
+    @field_validator("DATABASE_URL", mode="after")
+    @classmethod
+    def use_asyncpg_for_runtime(cls, url: str) -> str:
+        """Neon emits postgresql:// URLs; FastAPI needs SQLAlchemy's asyncpg dialect."""
+        if url.startswith("postgresql://"):
+            return url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return url
 
     @property
     def cors_origins_list(self) -> list[str]:

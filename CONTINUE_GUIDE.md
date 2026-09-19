@@ -58,6 +58,7 @@ From `D:\ARBAB\SIH Y26\frontend`:
 - `npm ci` completed successfully.
 - `npm run build` passed successfully.
 - The subsequent quality pass fixed the inherited unused-import, stale dependency, and render-created component warnings. `npm run lint` now has only React's conservative async effect/set-state advisories; `npm run build` passes.
+- Backend validation now passes: `python -m pytest` completed with **62 passed**. Tests are isolated to `test.db` and never inherit a Neon URL from `.env`.
 
 Live endpoint checks using PowerShell:
 
@@ -84,6 +85,12 @@ The browser check at localhost showed an expected dashboard API CORS failure whe
 - Verified response: HTTP 200, `Hello from Neon Functions`
 
 Neon writes branch connection values to the ignored `.env.local` file and link metadata to the ignored `.neon` file. Never commit either file or print their connection strings. The GitHub source branch remains `deploy-v2`; Neon database branches and Git branches are separate.
+
+## Render database troubleshooting
+
+If Render reports `Could not parse SQLAlchemy URL from string 'DATABASE_URL=...'`, its `DATABASE_URL` secret contains a copied dotenv assignment or a placeholder. In Render, replace both `DATABASE_URL` and `DATABASE_URL_SYNC` with real Neon connection-string values only. No `DATABASE_URL=` prefix belongs in the Value fields.
+
+The deployment script now stops with a direct secret-safe configuration error before Alembic. A valid normal Neon `postgresql://…` runtime URL is converted internally to `postgresql+asyncpg://…`; keep the Alembic sync URL as a normal PostgreSQL URL.
 
 ## Important known cleanup item
 

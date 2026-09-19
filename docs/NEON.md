@@ -22,3 +22,7 @@ neon functions get api -o json
 `.neon` identifies the linked project and branch. `.env.local` contains Neon-managed connection and service variables. Both are ignored and must never be committed or shared.
 
 The existing CODE MAZE FastAPI deployment remains the application API. The current Neon Function is a verified platform integration endpoint; migrating or duplicating the FastAPI API into it requires a separately scoped backend migration.
+
+## Render database secrets
+
+Set `DATABASE_URL` and `DATABASE_URL_SYNC` as Render secrets using the real values from Neon Connection Details. Paste the connection-string value only — not `DATABASE_URL=<value>`. Never commit or share either connection string.

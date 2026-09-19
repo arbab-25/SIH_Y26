@@ -12,6 +12,7 @@
 ## Evidence
 
 - `npm run build` in `frontend/` passed.
+- `python -m pytest` in `backend/` passed: 62 tests.
 - Browser-checked the revised scan workspace at desktop width and at 360px width.
 - Browser-checked dashboard empty/error states: it explicitly says only real inspection records are shown.
 - The deployed API health endpoint returned HTTP 200 with `db_ok: true` and OCR engine `tesseract`.
@@ -19,6 +20,8 @@
 ## Deployment note
 
 The deployed API currently rejects localhost browser requests through CORS. This is correct for a production deployment that permits only the Render frontend origin. For local end-to-end testing either run the FastAPI backend locally with `CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173`, or temporarily add the local Vite origin to the Render API service environment. Do not weaken production CORS to `*` when credentialed access is enabled.
+
+Render database configuration must use the real Neon connection string as the value of each secret. Do not paste a dotenv assignment such as `DATABASE_URL=postgresql://…` into Render's `DATABASE_URL` value field. The backend now rejects that error before attempting migrations and automatically converts a valid Neon runtime URL to SQLAlchemy's asyncpg dialect.
 
 ## Remaining validation
 
