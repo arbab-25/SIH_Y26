@@ -90,6 +90,7 @@ export interface ReportItem {
   product_name: string;
   manufacturer_name: string;
   category: string;
+  inspector_name?: string;
 }
 
 export interface DashboardStats {

@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from app.database import get_db
 from app.config import settings
+from app.services.ocr_service import get_ocr_engine_name, ocr_thread_count
 
 router = APIRouter(tags=["Health"])
 
@@ -52,10 +53,17 @@ async def health_check(db: AsyncSession = Depends(get_db)):
         db_ok = False
         db_error = _db_error_class(exc)
 
+    # Report the engine that is actually loaded rather than the configured
+    # preference: the previous value always echoed OCR_ENGINE, so a deployment check
+    # could not tell which engine had really served the scans.
+    active_engine = get_ocr_engine_name()
     response = {
         "status": "healthy" if db_ok else "degraded",
         "db_ok": db_ok,
-        "ocr_engine": settings.OCR_ENGINE,
+        "ocr_engine": active_engine or settings.OCR_ENGINE,
+        "ocr_engine_loaded": active_engine is not None,
+        "ocr_engine_preferred": settings.OCR_ENGINE,
+        "ocr_threads": ocr_thread_count(),
         "version": settings.APP_VERSION,
     }
     # Sanitized failure signature only — never credentials, hosts, or URLs.

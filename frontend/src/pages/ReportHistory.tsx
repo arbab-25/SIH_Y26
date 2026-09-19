@@ -5,11 +5,10 @@ import { ReportItem } from '../types';
 import { translations } from '../i18n/translations';
 
 interface ReportHistoryProps {
-  onViewReport: (reportNumber: string) => void;
   lang: 'en' | 'hi';
 }
 
-export const ReportHistory: React.FC<ReportHistoryProps> = ({ onViewReport, lang }) => {
+export const ReportHistory: React.FC<ReportHistoryProps> = ({ lang }) => {
   const t = translations[lang];
   const [reports, setReports] = useState<ReportItem[]>([]);
   const [page, setPage] = useState(1);
@@ -17,23 +16,31 @@ export const ReportHistory: React.FC<ReportHistoryProps> = ({ onViewReport, lang
   const [verdictFilter, setVerdictFilter] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const fetchReports = useCallback(async () => {
-    setLoading(true);
+  const fetchReports = useCallback(async (): Promise<{ items: ReportItem[]; pages: number }> => {
     try {
       let url = `/reports?page=${page}&size=10`;
       if (verdictFilter) url += `&verdict=${verdictFilter}`;
       const res = await api.get(url);
-      setReports(res.data?.items || []);
-      setTotalPages(res.data?.pages || 1);
+      return { items: (res.data?.items || []) as ReportItem[], pages: (res.data?.pages || 1) as number };
     } catch (err) {
       console.error('Failed to load reports:', err);
+      return { items: [], pages: 1 };
     } finally {
       setLoading(false);
     }
   }, [page, verdictFilter]);
 
+  // Initial/filter load: fetch then commit state together (no setState during the effect body).
   useEffect(() => {
-    void fetchReports();
+    let cancelled = false;
+    void fetchReports().then(({ items, pages }) => {
+      if (cancelled) return;
+      setReports(items);
+      setTotalPages(pages);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [fetchReports]);
 
   const handleExportExcel = async () => {
@@ -71,6 +78,25 @@ export const ReportHistory: React.FC<ReportHistoryProps> = ({ onViewReport, lang
     } catch (error) {
       console.error('Failed to download report PDF:', error);
       alert('PDF download failed.');
+    }
+  };
+
+  // The formal report IS the generated PDF (logo header, report number, cited
+  // violations, disclaimer). Opening it in a tab is the read-only view; the access
+  // token travels on the request, not in the URL.
+  const handleViewReport = async (reportNumber: string) => {
+    try {
+      const res = await api.get(`/reports/${reportNumber}/pdf`, { responseType: 'blob' });
+      const blob = new Blob([res.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      const tab = window.open(url, '_blank', 'noopener');
+      if (!tab) {
+        alert('Allow pop-ups for this site to open the report, or use the PDF download.');
+      }
+      window.setTimeout(() => window.URL.revokeObjectURL(url), 60_000);
+    } catch (error) {
+      console.error('Failed to open report:', error);
+      alert('Could not open this report. Please try again.');
     }
   };
 
@@ -118,6 +144,7 @@ export const ReportHistory: React.FC<ReportHistoryProps> = ({ onViewReport, lang
                 <th className="p-4">{t.manufacturer}</th>
                 <th className="p-4">Score</th>
                 <th className="p-4">Verdict</th>
+                <th className="p-4">Inspector</th>
                 <th className="p-4">{t.date}</th>
                 <th className="p-4 text-right">{t.actions}</th>
               </tr>
@@ -125,11 +152,11 @@ export const ReportHistory: React.FC<ReportHistoryProps> = ({ onViewReport, lang
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="p-8 text-center text-slate-400">Loading compliance reports...</td>
+                  <td colSpan={8} className="p-8 text-center text-slate-400">Loading compliance reports...</td>
                 </tr>
               ) : reports.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="p-8 text-center text-slate-400">No reports generated yet. Run a label scan to produce reports.</td>
+                  <td colSpan={8} className="p-8 text-center text-slate-400">No reports generated yet. Run a label scan to produce reports.</td>
                 </tr>
               ) : (
                 reports.map((r) => {
@@ -152,10 +179,11 @@ export const ReportHistory: React.FC<ReportHistoryProps> = ({ onViewReport, lang
                           {r.verdict}
                         </span>
                       </td>
+                      <td className="p-4 text-slate-600">{r.inspector_name || 'Not recorded'}</td>
                       <td className="p-4 text-slate-500">{new Date(r.created_at).toLocaleDateString()}</td>
                       <td className="p-4 text-right space-x-2">
                         <button
-                          onClick={() => onViewReport(r.report_number)}
+                          onClick={() => void handleViewReport(r.report_number)}
                           className="px-2.5 py-1 text-[#0E7490] hover:bg-cyan-50 rounded font-bold"
                         >
                           View

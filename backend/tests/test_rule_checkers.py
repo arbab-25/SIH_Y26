@@ -41,7 +41,15 @@ Includes ≥40 independent test cases:
 - Food product with ingredients & nutrition declared -> COMPLIANT
 - Fast food from restaurant -> COMPLIANT (Exempt)
 - DPCO-2013 drug formulation -> COMPLIANT (Exempt)
+- MRP read as ₹0 -> NON_COMPLIANT (a zero price used to pass as compliant)
+- Missing common/generic name -> NEEDS_REVIEW; unreadable name -> NON_COMPLIANT
+- Month of manufacture in the future -> NON_COMPLIANT; unreadable date -> NEEDS_REVIEW
+- Imported country text that is not a country -> NEEDS_REVIEW
+- Best before after manufacture -> COMPLIANT; at/before manufacture -> NON_COMPLIANT
+- Best before already passed -> NON_COMPLIANT; declared as a shelf life -> derived to a date
 """
+
+from datetime import date
 
 import pytest
 from app.models.scan import Verdict
@@ -49,9 +57,11 @@ from app.rule_checkers.rule_3_applicability import check_rule_3_applicability
 from app.rule_checkers.rule_26_exemptions import check_rule_26_exemptions
 from app.rule_checkers.rule_6_declarations import (
     check_manufacturer_details,
+    check_generic_name,
     check_country_of_origin,
     check_mrp_declaration,
     check_mfg_date_declaration,
+    check_best_before_declaration,
     check_consumer_care_details
 )
 from app.rule_checkers.rule_12_quantity import check_vague_quantity_words
@@ -403,6 +413,8 @@ def test_master_evaluation_fully_compliant_product():
         "mrp": {"value": 25.0, "confidence": 0.95},
         "mrp_inclusive_taxes": {"value": True, "confidence": 0.95},
         "mfg_date_str": {"value": "01/2026", "confidence": 0.95},
+        # Rule 6(1)(da) — perishable commodity packed 01/2026 with a 01/2029 best before date.
+        "best_before": {"value": "01/2029", "confidence": 0.95},
         "consumer_care_phone": {"value": "1800-425-4449", "confidence": 0.95},
         "consumer_care_email": {"value": "feedback@britannia.co.in", "confidence": 0.95},
         "fssai_number": {"value": "10015043001129", "confidence": 0.95},
@@ -443,3 +455,180 @@ def test_master_evaluation_violating_product():
     assert eval_result.verdict == Verdict.NON_COMPLIANT
     assert len(eval_result.violations) >= 2
     assert eval_result.penalty_notice is not None
+
+
+def test_master_evaluation_missing_best_before_routes_to_needs_review():
+    """Rule 6(1)(da): a perishable pack with no readable best before is not a pass."""
+    mock_extracted = {
+        "manufacturer_name": {"value": "Britannia Industries Ltd", "confidence": 0.95},
+        "manufacturer_address": {"value": "Kolkata, West Bengal", "confidence": 0.95},
+        "pin_code": {"value": "700017", "confidence": 0.95},
+        "product_name": {"value": "Biscuits", "confidence": 0.95},
+        "net_quantity_value": {"value": 100.0, "confidence": 0.95},
+        "net_quantity_unit": {"value": "g", "confidence": 0.95},
+        "mrp": {"value": 25.0, "confidence": 0.95},
+        "mrp_inclusive_taxes": {"value": True, "confidence": 0.95},
+        "mfg_date_str": {"value": "01/2026", "confidence": 0.95},
+        "consumer_care_phone": {"value": "1800-425-4449", "confidence": 0.95},
+    }
+
+    eval_result = evaluate_product_compliance(extracted_data=mock_extracted, category="food")
+
+    best_before_result = next(r for r in eval_result.results if r.field == "best_before")
+    assert best_before_result.status == Verdict.NEEDS_REVIEW
+    assert eval_result.verdict == Verdict.NEEDS_REVIEW
+
+
+# ----------------------------------------------------------------------
+# Rule 6(1)(e): MRP Amount Validity
+# ----------------------------------------------------------------------
+def test_mrp_zero_is_non_compliant():
+    # Regression: ₹0 passed the rounding and tax checks and was reported COMPLIANT.
+    res = check_mrp_declaration(mrp=0.0, has_tax_qualification=True, confidence=0.95)
+    assert res.status == Verdict.NON_COMPLIANT
+    assert res.rule_ref == "rule-6-1-e"
+
+
+def test_mrp_negative_value_is_non_compliant():
+    res = check_mrp_declaration(mrp=-12.0, has_tax_qualification=True, confidence=0.90)
+    assert res.status == Verdict.NON_COMPLIANT
+
+
+# ----------------------------------------------------------------------
+# Rule 6(1)(b): Common / Generic Name
+# ----------------------------------------------------------------------
+def test_generic_name_declared_is_compliant():
+    res = check_generic_name(name="Biscuits", confidence=0.95)
+    assert res.status == Verdict.COMPLIANT
+    assert res.rule_ref == "rule-6-1-b"
+
+
+def test_generic_name_missing_is_needs_review():
+    res = check_generic_name(name=None, confidence=0.0)
+    assert res.status == Verdict.NEEDS_REVIEW
+
+
+def test_generic_name_unreadable_is_non_compliant():
+    res = check_generic_name(name="12374", confidence=0.93)
+    assert res.status == Verdict.NON_COMPLIANT
+
+
+def test_generic_name_low_confidence_is_needs_review():
+    res = check_generic_name(name="Bisc", confidence=0.42)
+    assert res.status == Verdict.NEEDS_REVIEW
+
+
+# ----------------------------------------------------------------------
+# Rule 6(1)(d): Manufacture Date Sanity
+# ----------------------------------------------------------------------
+def test_mfg_date_in_the_future_is_non_compliant():
+    res = check_mfg_date_declaration(date_str="12/2099", category="detergent", confidence=0.95)
+    assert res.status == Verdict.NON_COMPLIANT
+    assert "future" in res.message_en.lower()
+
+
+def test_mfg_date_unreadable_value_is_needs_review():
+    res = check_mfg_date_declaration(date_str="batch 12 A", category="detergent", confidence=0.95)
+    assert res.status == Verdict.NEEDS_REVIEW
+
+
+def test_mfg_date_before_reference_month_is_compliant():
+    res = check_mfg_date_declaration(
+        date_str="05/2026", category="detergent", confidence=0.95, today=date(2026, 9, 19)
+    )
+    assert res.status == Verdict.COMPLIANT
+
+
+def test_mfg_date_after_reference_month_is_non_compliant():
+    res = check_mfg_date_declaration(
+        date_str="05/2026", category="detergent", confidence=0.95, today=date(2026, 4, 1)
+    )
+    assert res.status == Verdict.NON_COMPLIANT
+
+
+# ----------------------------------------------------------------------
+# Rule 6(1)(aa): Country of Origin Content
+# ----------------------------------------------------------------------
+def test_imported_package_with_iso_country_code_is_compliant():
+    res = check_country_of_origin(country="IN", is_imported=True, confidence=0.95)
+    assert res.status == Verdict.COMPLIANT
+
+
+def test_imported_package_with_unrecognised_origin_is_needs_review():
+    res = check_country_of_origin(country="Xqrt", is_imported=True, confidence=0.95)
+    assert res.status == Verdict.NEEDS_REVIEW
+    assert "recognised" in res.message_en
+
+
+# ----------------------------------------------------------------------
+# Rule 6(1)(da): Best Before / Use By Date
+# ----------------------------------------------------------------------
+def test_best_before_after_manufacture_is_compliant():
+    res = check_best_before_declaration(
+        best_before="12/2026", category="food", mfg_date_str="06/2026",
+        confidence=0.95, today=date(2026, 9, 19)
+    )
+    assert res.status == Verdict.COMPLIANT
+    assert res.rule_ref == "rule-6-1-da"
+
+
+def test_best_before_not_after_manufacture_is_non_compliant():
+    res = check_best_before_declaration(
+        best_before="01/2026", category="food", mfg_date_str="06/2026",
+        confidence=0.95, today=date(2026, 9, 19)
+    )
+    assert res.status == Verdict.NON_COMPLIANT
+    assert "not after" in res.message_en
+
+
+def test_best_before_already_passed_is_non_compliant():
+    res = check_best_before_declaration(
+        best_before="01/2026", category="food", mfg_date_str="06/2025",
+        confidence=0.95, today=date(2026, 9, 19)
+    )
+    assert res.status == Verdict.NON_COMPLIANT
+    assert res.severity == "MINOR"
+
+
+def test_best_before_expiring_in_current_month_is_compliant_with_note():
+    res = check_best_before_declaration(
+        best_before="09/2026", category="food", mfg_date_str="01/2026",
+        confidence=0.95, today=date(2026, 9, 19)
+    )
+    assert res.status == Verdict.COMPLIANT
+    assert "current month" in res.message_en
+
+
+def test_best_before_shelf_life_is_derived_from_manufacture_month():
+    res = check_best_before_declaration(
+        best_before="Best Before: 12 months from packaging", category="food",
+        mfg_date_str="01/2026", confidence=0.90, today=date(2026, 9, 19)
+    )
+    assert res.status == Verdict.COMPLIANT
+    assert "Jan 2027" in res.message_en
+
+
+def test_best_before_shelf_life_without_manufacture_is_needs_review():
+    res = check_best_before_declaration(
+        best_before="6 months from packaging", category="food", mfg_date_str=None,
+        confidence=0.90, today=date(2026, 9, 19)
+    )
+    assert res.status == Verdict.NEEDS_REVIEW
+
+
+def test_best_before_missing_for_perishable_is_needs_review():
+    res = check_best_before_declaration(best_before=None, category="food", confidence=0.0)
+    assert res.status == Verdict.NEEDS_REVIEW
+
+
+def test_best_before_missing_for_non_perishable_is_compliant():
+    res = check_best_before_declaration(best_before=None, category="cement", confidence=0.0)
+    assert res.status == Verdict.COMPLIANT
+
+
+def test_best_before_unreadable_value_is_needs_review():
+    res = check_best_before_declaration(
+        best_before="see bottom of pack", category="food", mfg_date_str="01/2026",
+        confidence=0.90, today=date(2026, 9, 19)
+    )
+    assert res.status == Verdict.NEEDS_REVIEW

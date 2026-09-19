@@ -15,9 +15,11 @@ from app.rule_checkers.rule_3_applicability import check_rule_3_applicability
 from app.rule_checkers.rule_26_exemptions import check_rule_26_exemptions
 from app.rule_checkers.rule_6_declarations import (
     check_manufacturer_details,
+    check_generic_name,
     check_country_of_origin,
     check_mrp_declaration,
     check_mfg_date_declaration,
+    check_best_before_declaration,
     check_consumer_care_details
 )
 from app.rule_checkers.rule_12_quantity import check_vague_quantity_words
@@ -112,7 +114,18 @@ def evaluate_product_compliance(
     )
     results.append(r_mfg)
 
-    # 2.2 Country of Origin (Rule 6(1)(aa) for imported goods)
+    # 2.2 Common / Generic name of the commodity (Rule 6(1)(b))
+    generic_name = extracted_data.get("product_name", {}).get("value")
+    generic_conf = extracted_data.get("product_name", {}).get("confidence", 0.0)
+
+    r_name = check_generic_name(
+        name=generic_name,
+        confidence=generic_conf,
+        bbox=extracted_data.get("product_name", {}).get("bbox")
+    )
+    results.append(r_name)
+
+    # 2.3 Country of Origin (Rule 6(1)(aa) for imported goods)
     origin = extracted_data.get("country_of_origin", {}).get("value")
     origin_conf = extracted_data.get("country_of_origin", {}).get("confidence", 0.0)
     origin_bbox = extracted_data.get("country_of_origin", {}).get("bbox")
@@ -125,7 +138,7 @@ def evaluate_product_compliance(
     )
     results.append(r_origin)
 
-    # 2.3 Net Quantity in standard SI units (Rule 6(1)(c) & Rule 13)
+    # 2.4 Net Quantity in standard SI units (Rule 6(1)(c) & Rule 13)
     r_si = check_si_units(
         value=net_qty_val,
         unit=net_qty_unit,
@@ -134,7 +147,7 @@ def evaluate_product_compliance(
     )
     results.append(r_si)
 
-    # 2.4 Prohibited vague quantity words (Rule 12(6))
+    # 2.5 Prohibited vague quantity words (Rule 12(6))
     vague_word = extracted_data.get("vague_quantity_found", {}).get("value")
     r_vague = check_vague_quantity_words(
         vague_word_found=vague_word,
@@ -143,7 +156,7 @@ def evaluate_product_compliance(
     )
     results.append(r_vague)
 
-    # 2.5 Standard Pack Sizes under Second Schedule (Rule 5)
+    # 2.6 Standard Pack Sizes under Second Schedule (Rule 5)
     prod_name = extracted_data.get("product_name", {}).get("value") or category or ""
     r_pack = check_second_schedule_pack_size(
         commodity_or_product_name=prod_name,
@@ -153,7 +166,7 @@ def evaluate_product_compliance(
     )
     results.append(r_pack)
 
-    # 2.6 Maximum Retail Price (MRP) & Tax Qualification (Rule 6(1)(e))
+    # 2.7 Maximum Retail Price (MRP) & Tax Qualification (Rule 6(1)(e))
     mrp_val = extracted_data.get("mrp", {}).get("value")
     has_taxes = extracted_data.get("mrp_inclusive_taxes", {}).get("value", False)
     mrp_conf = extracted_data.get("mrp", {}).get("confidence", 0.0)
@@ -167,7 +180,7 @@ def evaluate_product_compliance(
     )
     results.append(r_mrp)
 
-    # 2.7 Date of Manufacture / Pre-packing / Import (Rule 6(1)(d))
+    # 2.8 Date of Manufacture / Pre-packing / Import (Rule 6(1)(d))
     mfg_date = extracted_data.get("mfg_date_str", {}).get("value")
     mfg_date_conf = extracted_data.get("mfg_date_str", {}).get("confidence", 0.0)
     mfg_date_bbox = extracted_data.get("mfg_date_str", {}).get("bbox")
@@ -180,7 +193,21 @@ def evaluate_product_compliance(
     )
     results.append(r_date)
 
-    # 2.8 Consumer Care Details (Rule 6(2))
+    # 2.9 Best before / use by date (Rule 6(1)(da)) — cross-checked against the
+    # month and year of manufacture so an impossible date cannot pass.
+    best_before = extracted_data.get("best_before", {}).get("value")
+    best_before_conf = extracted_data.get("best_before", {}).get("confidence", 0.0)
+
+    r_best_before = check_best_before_declaration(
+        best_before=best_before,
+        category=category,
+        mfg_date_str=mfg_date,
+        confidence=best_before_conf,
+        bbox=extracted_data.get("best_before", {}).get("bbox")
+    )
+    results.append(r_best_before)
+
+    # 2.10 Consumer Care Details (Rule 6(2))
     cc_phone = extracted_data.get("consumer_care_phone", {}).get("value")
     cc_email = extracted_data.get("consumer_care_email", {}).get("value")
     cc_conf = max(

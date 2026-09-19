@@ -8,6 +8,15 @@ from app.main import app
 from app.services.auth_service import create_access_token
 
 
+async def _login(ac: AsyncClient, identifier: str, password: str) -> dict:
+    """Sign in and return an Authorization header for that account."""
+    resp = await ac.post(
+        "/api/v1/auth/login", json={"identifier": identifier, "password": password}
+    )
+    assert resp.status_code == 200, resp.text
+    return {"Authorization": "Bearer " + resp.json()["token"]["access_token"]}
+
+
 def create_mock_label_image():
     """Create a minimal valid image bytes for testing upload."""
     img = Image.new("RGB", (600, 400), color=(255, 255, 255))
@@ -53,6 +62,15 @@ async def test_full_scan_report_workflow():
         assert "confidence_pie" in details
         assert len(details["confidence_pie"]) == 3
 
+        # Every violation must cite a rule that really exists in the seeded rule book,
+        # so the Rule Book deep link from the analysis screen resolves.
+        if details["violations"]:
+            rules_resp = await ac.get("/api/v1/rules")
+            assert rules_resp.status_code == 200
+            seeded_rules = {r["rule_number"] for r in rules_resp.json()}
+            for violation in details["violations"]:
+                assert violation["rule_ref"] in seeded_rules
+
         # 3. Test Field Override (Inspector amends a field)
         patch_resp = await ac.patch(
             f"/api/v1/scans/{scan_id}/fields/net_quantity_value",
@@ -69,16 +87,42 @@ async def test_full_scan_report_workflow():
         report_number = rep_data["report_number"]
         assert "CMD-" in report_number
 
-        # 5. Fetch Report Details
-        get_rep_resp = await ac.get(f"/api/v1/reports/{report_number}")
+        # 5. Fetch Report Details (generating inspector)
+        get_rep_resp = await ac.get(f"/api/v1/reports/{report_number}", headers=headers)
         assert get_rep_resp.status_code == 200
         assert get_rep_resp.json()["report_number"] == report_number
 
         # 6. Download PDF
-        pdf_resp = await ac.get(f"/api/v1/reports/{report_number}/pdf")
+        pdf_resp = await ac.get(f"/api/v1/reports/{report_number}/pdf", headers=headers)
         assert pdf_resp.status_code == 200
         assert pdf_resp.headers["content-type"] == "application/pdf"
         assert len(pdf_resp.content) > 100
+
+        # 6b. A report is an inspection record: an anonymous caller must not be able
+        # to read it by report number (the numbers are sequential and guessable).
+        assert (await ac.get(f"/api/v1/reports/{report_number}")).status_code == 401
+        assert (await ac.get(f"/api/v1/reports/{report_number}/pdf")).status_code == 401
+
+        # 6c. Another inspector cannot read it either, but a Senior Officer/Admin can.
+        other_inspector = await _login(ac, "inspector@demo.gov.in", "Demo@1234")
+        assert (
+            await ac.get(f"/api/v1/reports/{report_number}", headers=other_inspector)
+        ).status_code == 403
+        assert (
+            await ac.get(f"/api/v1/reports/{report_number}/pdf", headers=other_inspector)
+        ).status_code == 403
+        admin_headers = await _login(ac, "admin@codemaze.app", "Admin@1234")
+        assert (
+            await ac.get(f"/api/v1/reports/{report_number}", headers=admin_headers)
+        ).status_code == 200
+
+        # 6d. The report's own share token grants read-only access without an account.
+        share_token = rep_data["share_token"]
+        shared = await ac.get(
+            f"/api/v1/reports/{report_number}", params={"share_token": share_token}
+        )
+        assert shared.status_code == 200
+        assert shared.json()["report_number"] == report_number
 
         # 7. Test 'Report this Product' Email Escalation
         email_resp = await ac.post(
@@ -97,13 +141,25 @@ async def test_full_scan_report_workflow():
         assert list_resp.status_code == 200
         assert len(list_resp.json()["items"]) >= 1
 
-        # 9. List Reports & Excel export
-        rep_list_resp = await ac.get("/api/v1/reports?page=1&size=10")
-        assert rep_list_resp.status_code == 200
+        # 9. List Reports & Excel export (authenticated; the office record is not public)
+        assert (await ac.get("/api/v1/reports?page=1&size=10")).status_code == 401
+        assert (await ac.get("/api/v1/reports?format=excel")).status_code == 401
 
-        excel_resp = await ac.get("/api/v1/reports?format=excel")
+        rep_list_resp = await ac.get("/api/v1/reports?page=1&size=10", headers=headers)
+        assert rep_list_resp.status_code == 200
+        listed = rep_list_resp.json()["items"]
+        assert any(r["report_number"] == report_number for r in listed)
+        # The inspector column must name the real generating account, not a placeholder.
+        assert all(r["inspector_name"] for r in listed)
+
+        excel_resp = await ac.get("/api/v1/reports?format=excel", headers=headers)
         assert excel_resp.status_code == 200
         assert len(excel_resp.content) > 50
+
+        # An inspector's list must not expose another inspector's reports.
+        other_list = await ac.get("/api/v1/reports?page=1&size=25", headers=other_inspector)
+        assert other_list.status_code == 200
+        assert all(r["report_number"] != report_number for r in other_list.json()["items"])
 
         # 10. Dashboard stats
         dash_resp = await ac.get("/api/v1/dashboard/stats")

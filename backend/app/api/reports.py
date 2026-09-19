@@ -1,6 +1,7 @@
 """Reports API Router — Generate, View, Download PDF, Bulk Excel, and Email Reports."""
 
 import os
+import secrets
 import uuid
 from datetime import datetime
 from typing import Optional
@@ -14,12 +15,54 @@ from app.database import get_db
 from app.models.user import User
 from app.models.scan import Scan
 from app.models.report import Report
-from app.api.deps import get_current_user
+from app.models.violation import Violation
+from app.api.deps import get_current_user, get_optional_current_user
 from app.services.pdf_service import generate_compliance_pdf
 from app.services.email_service import send_report_email
 from app.services.excel_service import export_reports_to_excel
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
+
+
+def _sees_all_reports(user: User) -> bool:
+    """Senior Officers and Admins see every report; an inspector sees their own (§7.6)."""
+    role = user.role.value if hasattr(user.role, "value") else str(user.role)
+    return role in ("ADMIN", "SENIOR_OFFICER")
+
+
+def _inspector_label(report: Report) -> str:
+    """Name the account that generated the report, or "Guest device" for records
+    written before accounts were required (§7.5/§7.6)."""
+    user = getattr(report, "generated_by_user", None)
+    if user is not None and user.name:
+        return user.name
+    return "Guest device" if report.generated_by is None else "Unknown inspector"
+
+
+def _assert_report_access(
+    report: Report, user: Optional[User], share_token: Optional[str] = None
+) -> None:
+    """Gate access to a single report.
+
+    A report carries an inspection's declarations, violations and confidence data, so
+    reading one is limited to the inspector who generated it, a Senior Officer/Admin,
+    or a caller presenting that report's own unpredictable share token. Access by
+    report number alone is not enough: report numbers are sequential
+    (CMD-20260919-0001), so the number is guessable.
+    """
+    if user is not None and (_sees_all_reports(user) or report.generated_by == user.id):
+        return
+    if share_token and report.share_token and secrets.compare_digest(str(share_token), str(report.share_token)):
+        return
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Sign in to view this report, or open it through its share link.",
+        )
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="This report belongs to another inspector. Sign in with the generating account or use its share link.",
+    )
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -44,7 +87,7 @@ async def create_report(
         .options(
             selectinload(Scan.product),
             selectinload(Scan.extracted_fields),
-            selectinload(Scan.violations)
+            selectinload(Scan.violations).selectinload(Violation.rule)
         )
     )
     res = await db.execute(stmt)
@@ -86,7 +129,11 @@ async def create_report(
                 "field_key": v.field_key,
                 "message_en": v.message_en,
                 "suggested_fix": v.suggested_fix,
-                "rule_ref": getattr(v, "rule_ref", None) or f"rule-{v.field_key.replace('_', '-')}"
+                # Prefer the persisted cited-rule string; fall back to the linked
+                # rules row, then the legacy field-key form for old rows, so the
+                # PDF cites "rule-6-1-e" rather than a field-name reference.
+                "rule_ref": v.rule_ref
+                or (v.rule.rule_number if v.rule else f"rule-{v.field_key.replace('_', '-')}"),
             }
             for v in scan.violations
         ],
@@ -133,8 +180,13 @@ async def create_report(
 
 
 @router.get("/{report_id_or_number}")
-async def get_report(report_id_or_number: str, db: AsyncSession = Depends(get_db)):
-    """Fetch report details by ID or report_number."""
+async def get_report(
+    report_id_or_number: str,
+    share_token: Optional[str] = Query(None, description="Report share token, for read-only access"),
+    current_user: Optional[User] = Depends(get_optional_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Fetch report details by ID or report_number (generating inspector, officer/admin, or share token)."""
     stmt = (
         select(Report)
         .options(
@@ -153,6 +205,7 @@ async def get_report(report_id_or_number: str, db: AsyncSession = Depends(get_db
     report = res.scalar_one_or_none()
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
+    _assert_report_access(report, current_user, share_token)
 
     scan = report.scan
     return {
@@ -189,8 +242,13 @@ async def get_report(report_id_or_number: str, db: AsyncSession = Depends(get_db
 
 
 @router.get("/{report_id_or_number}/pdf")
-async def download_report_pdf(report_id_or_number: str, db: AsyncSession = Depends(get_db)):
-    """Download the generated compliance PDF file."""
+async def download_report_pdf(
+    report_id_or_number: str,
+    share_token: Optional[str] = Query(None, description="Report share token, for read-only access"),
+    current_user: Optional[User] = Depends(get_optional_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Download the generated compliance PDF file (generating inspector, officer/admin, or share token)."""
     stmt = select(Report)
     try:
         uid = uuid.UUID(report_id_or_number)
@@ -202,6 +260,7 @@ async def download_report_pdf(report_id_or_number: str, db: AsyncSession = Depen
     report = res.scalar_one_or_none()
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
+    _assert_report_access(report, current_user, share_token)
 
     backend_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     pdf_path = os.path.join(backend_root, "uploads", "reports", f"{report.report_number}.pdf")
@@ -214,7 +273,7 @@ async def download_report_pdf(report_id_or_number: str, db: AsyncSession = Depen
             .options(
                 selectinload(Scan.product),
                 selectinload(Scan.extracted_fields),
-                selectinload(Scan.violations)
+                selectinload(Scan.violations).selectinload(Violation.rule)
             )
         )
         scan = (await db.execute(stmt_scan)).scalar_one()
@@ -228,7 +287,13 @@ async def download_report_pdf(report_id_or_number: str, db: AsyncSession = Depen
                 "product_name": scan.product.product_name if scan.product else "Commodity",
                 "manufacturer_name": scan.product.manufacturer_name if scan.product else "",
                 "category": scan.category or "Retail",
-                "violations": [{"message_en": v.message_en, "rule_ref": v.field_key} for v in scan.violations],
+                "violations": [
+                    {
+                        "message_en": v.message_en,
+                        "rule_ref": v.rule.rule_number if v.rule else f"rule-{v.field_key.replace('_', '-')}"
+                    }
+                    for v in scan.violations
+                ],
                 "extracted_fields": [{"field_key": f.field_key, "field_value": f.field_value, "confidence": float(f.confidence or 0), "status": f.status.value} for f in scan.extracted_fields]
             },
             output_path=pdf_path,
@@ -254,7 +319,7 @@ async def email_report(
         select(Report)
         .options(
             selectinload(Report.scan).selectinload(Scan.product),
-            selectinload(Report.scan).selectinload(Scan.violations)
+            selectinload(Report.scan).selectinload(Scan.violations).selectinload(Violation.rule)
         )
     )
     try:
@@ -267,6 +332,7 @@ async def email_report(
     report = res.scalar_one_or_none()
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
+    _assert_report_access(report, current_user)
 
     backend_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     pdf_path = os.path.join(backend_root, "uploads", "reports", f"{report.report_number}.pdf")
@@ -279,7 +345,7 @@ async def email_report(
 
     violations_data = [
         {
-            "rule_ref": v.field_key,
+            "rule_ref": v.rule.rule_number if v.rule else f"rule-{v.field_key.replace('_', '-')}",
             "message_en": v.message_en,
             "suggested_fix": v.suggested_fix
         }
@@ -310,17 +376,28 @@ async def list_reports(
     size: int = Query(25, ge=1, le=100),
     verdict: Optional[str] = Query(None),
     format: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Paginated list of reports, or Excel export if ?format=excel per §7.6."""
+    """Paginated list of reports, or Excel export if ?format=excel per §7.6.
+
+    Authentication is required: the list and the bulk Excel export both contain
+    inspection records (product, manufacturer, verdict, score, inspector).
+    """
     stmt = (
         select(Report)
         .options(
             selectinload(Report.scan).selectinload(Scan.product),
-            selectinload(Report.scan).selectinload(Scan.violations)
+            selectinload(Report.scan).selectinload(Scan.violations),
+            selectinload(Report.generated_by_user),
         )
         .order_by(desc(Report.created_at))
     )
+
+    # Same visibility rule as /scans: an inspector sees their own reports only;
+    # Senior Officers and Admins see the whole office's.
+    if not _sees_all_reports(current_user):
+        stmt = stmt.where(Report.generated_by == current_user.id)
 
     res = await db.execute(stmt)
     all_reports = res.scalars().all()
@@ -342,7 +419,9 @@ async def list_reports(
                 "verdict": s.verdict.value if s and s.verdict else "NEEDS_REVIEW",
                 "compliance_score": float(s.compliance_score or 0.0) if s else 0.0,
                 "avg_ocr_confidence": float(s.avg_ocr_confidence or 0.0) if s else 0.0,
-                "inspector_name": "Inspector",
+                # Real generating account, never a placeholder: the export is the
+                # office's record of who inspected what.
+                "inspector_name": _inspector_label(r),
                 "violations_count": len(s.violations) if s else 0
             })
         excel_bytes = export_reports_to_excel(excel_rows)
@@ -369,7 +448,8 @@ async def list_reports(
             "compliance_score": float(s.compliance_score or 0.0) if s else 0.0,
             "product_name": s.product.product_name if s and s.product else "Pre-packaged Item",
             "manufacturer_name": s.product.manufacturer_name if s and s.product else "N/A",
-            "category": s.category if s else "General"
+            "category": s.category if s else "General",
+            "inspector_name": _inspector_label(r)
         })
 
     return {

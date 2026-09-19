@@ -16,6 +16,7 @@ from app.models.user import User
 from app.models.scan import Scan, ScanStatus, Verdict
 from app.models.product import Product
 from app.models.extracted_field import ExtractedField
+from app.models.rule import Rule
 from app.models.violation import Violation, Severity
 from app.models.field_override import FieldOverride
 from app.api.deps import get_current_user
@@ -172,12 +173,14 @@ async def create_scan(
         "manufacturer_name": "manufacturer",
         "manufacturer_address": "manufacturer",
         "pin_code": "manufacturer",
+        "product_name": "product_name",
         "net_quantity_value": "net_quantity",
         "net_quantity_unit": "net_quantity",
         "vague_quantity_found": "net_quantity_qualifiers",
         "mrp": "mrp",
         "mrp_inclusive_taxes": "mrp",
         "mfg_date_str": "mfg_date",
+        "best_before": "best_before",
         "fssai_number": "fssai_license",
         "ingredients_declared": "ingredients_list",
         "nutritional_info_declared": "nutritional_information",
@@ -185,7 +188,7 @@ async def create_scan(
     }
     # Fields that are display/context only — they carry no statutory check of
     # their own, so a clean read is simply COMPLIANT, never NEEDS_REVIEW.
-    DISPLAY_ONLY_FIELDS = {"brand", "product_name", "best_before", "mrp_detected_text", "barcode_gtin"}
+    DISPLAY_ONLY_FIELDS = {"brand", "mrp_detected_text", "barcode_gtin"}
 
     for key, item in extracted_dict.items():
         engine_field = ENGINE_FIELD_ALIASES.get(key)
@@ -215,13 +218,19 @@ async def create_scan(
         )
         db.add(ef)
 
-    # 8. Persist Violations (with the exact rule reference so the UI can deep-link
-    # into the Rule Book — e.g. /rulebook/rule-6-1-e, not a synthetic field name)
+    # 8. Persist Violations. Every checker reports the exact rule it applies
+    # (e.g. "rule-6-1-e"); that string is persisted for deep-linking and resolved
+    # to the seeded rules rows so each violation also links to the quoted
+    # statutory text in the Rule Book instead of a synthesised reference.
+    rule_rows = (await db.execute(select(Rule.id, Rule.rule_number))).all()
+    rule_id_by_number = {rule_number: rule_id for rule_id, rule_number in rule_rows}
+
     for v in evaluation.violations:
         viol = Violation(
             scan_id=scan_id,
             field_key=v.field,
             rule_ref=v.rule_ref,
+            rule_id=rule_id_by_number.get(v.rule_ref),
             severity=Severity.MAJOR if v.severity == "MAJOR" else Severity.MINOR,
             message_en=v.message_en,
             message_hi=v.message_hi,
@@ -229,7 +238,14 @@ async def create_scan(
         )
         db.add(viol)
 
-    # 9. Persist Product summary record (plain values only — see _val())
+    # 9. Persist Product summary record (plain values only — see _val()).
+    # The extractor omits a key it could not read, so None means "not detected" and
+    # is stored as NULL. A declared zero would be a defect of its own, so NULL is
+    # kept distinct from 0. Country of origin is only written when actually read:
+    # defaulting to "India" for domestic packages recorded a declaration that may
+    # never appear on the package, which a statutory report must not invent.
+    nq_value = _val(extracted_dict, "net_quantity_value")
+    mrp_value = _val(extracted_dict, "mrp")
     product = Product(
         scan_id=scan_id,
         product_name=str(_val(extracted_dict, "product_name") or "Pre-packaged Commodity"),
@@ -238,10 +254,10 @@ async def create_scan(
         manufacturer_name=str(_val(extracted_dict, "manufacturer_name") or ""),
         manufacturer_address=str(_val(extracted_dict, "manufacturer_address") or ""),
         pin_code=str(_val(extracted_dict, "pin_code") or ""),
-        country_of_origin=str(_val(extracted_dict, "country_of_origin") or ("India" if not is_imported else "")),
-        net_quantity_value=float(_val(extracted_dict, "net_quantity_value") or 0.0),
+        country_of_origin=str(_val(extracted_dict, "country_of_origin") or ""),
+        net_quantity_value=float(nq_value) if nq_value is not None else None,
         net_quantity_unit=str(_val(extracted_dict, "net_quantity_unit") or ""),
-        mrp=float(_val(extracted_dict, "mrp") or 0.0),
+        mrp=float(mrp_value) if mrp_value is not None else None,
         fssai_number=str(_val(extracted_dict, "fssai_number") or ""),
         consumer_care_phone=str(_val(extracted_dict, "consumer_care_phone") or ""),
         consumer_care_email=str(_val(extracted_dict, "consumer_care_email") or ""),
@@ -253,7 +269,18 @@ async def create_scan(
     scan.status = ScanStatus.DONE
     scan.verdict = evaluation.verdict
     scan.compliance_score = evaluation.compliance_score
-    scan.avg_ocr_confidence = combined_metadata.get("avg_confidence", 0.0)
+    # Average every word read across all panels; the per-image metadata only described
+    # the last panel, so a multi-image scan under-reported or over-reported OCR quality.
+    if all_ocr_items:
+        word_confidences = [
+            item.confidence * 100 if item.confidence <= 1.0 else item.confidence
+            for item in all_ocr_items
+        ]
+        scan.avg_ocr_confidence = round(sum(word_confidences) / len(word_confidences), 2)
+    else:
+        scan.avg_ocr_confidence = 0.0
+    # Record the engine that actually ran, not the configured preference, so every
+    # stored confidence stays traceable to the engine that produced it.
     scan.ocr_engine = combined_metadata.get("engine") or settings.OCR_ENGINE
     scan.processing_time_ms = int((time.time() - start_time) * 1000)
 
@@ -286,7 +313,7 @@ async def get_scan_details(
         .where(Scan.id == scan_id)
         .options(
             selectinload(Scan.extracted_fields),
-            selectinload(Scan.violations),
+            selectinload(Scan.violations).selectinload(Violation.rule),
             selectinload(Scan.product),
             selectinload(Scan.field_overrides),
         )
@@ -340,8 +367,16 @@ async def get_scan_details(
             "manufacturer_name": scan.product.manufacturer_name if scan.product else "",
             "manufacturer_address": scan.product.manufacturer_address if scan.product else "",
             "pin_code": scan.product.pin_code if scan.product else "",
-            "net_quantity": f"{scan.product.net_quantity_value} {scan.product.net_quantity_unit}" if scan.product else "",
-            "mrp": f"Rs. {scan.product.mrp}" if scan.product else "",
+            # A zero here means "not detected". Formatting it as "0.0" or "Rs. 0.00"
+            # would read as a declared quantity or price of zero on a statutory report.
+            "net_quantity": (
+                f"{float(scan.product.net_quantity_value):g} {scan.product.net_quantity_unit}".strip()
+                if scan.product and float(scan.product.net_quantity_value or 0) > 0 else ""
+            ),
+            "mrp": (
+                f"Rs. {float(scan.product.mrp):.2f}"
+                if scan.product and float(scan.product.mrp or 0) > 0 else ""
+            ),
             "fssai_number": scan.product.fssai_number if scan.product else "",
             "consumer_care_phone": scan.product.consumer_care_phone if scan.product else "",
             "consumer_care_email": scan.product.consumer_care_email if scan.product else "",
@@ -366,7 +401,10 @@ async def get_scan_details(
                 "message_en": v.message_en,
                 "message_hi": v.message_hi,
                 "suggested_fix": v.suggested_fix,
-                "rule_ref": getattr(v, "rule_ref", None) or f"rule-{v.field_key.replace('_', '-')}"
+                # Prefer the persisted cited-rule string; fall back to the linked
+                # rules row, then the legacy field-key form for old rows.
+                "rule_ref": v.rule_ref
+                or (v.rule.rule_number if v.rule else f"rule-{v.field_key.replace('_', '-')}"),
             }
             for v in scan.violations
         ],

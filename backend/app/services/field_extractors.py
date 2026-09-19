@@ -15,6 +15,26 @@ import re
 from typing import Dict, Any, List, Optional
 from rapidfuzz import fuzz, process
 
+from app.utils.regulatory_parsing import is_known_country
+
+# Declaration keywords that end an address block. Without this, the lines printed
+# after the address (e-mail, customer care, licence number) were swallowed into the
+# manufacturer address stored on the scan.
+_DECLARATION_MARKER_RE = re.compile(
+    r"\b(e-?mail|email|customer\s*care|consumer\s*care|care\s*(?:no|number)|ph\.?|phone|"
+    r"telephone|mobile|helpline|toll\s*free|fssai|lic\.?\s*no|licence|license|"
+    r"net\s*(?:wt|weight|qty|quantity|content|vol|volume)|nett\s*wt|mrp|max\.?\s*retail|"
+    r"mfd|mfg|pkd|best\s*before|use\s*by|batch|lot\s*no|country\s*of\s*origin)\b",
+    re.IGNORECASE,
+)
+
+# TLDs accepted when trimming a glued character off an OCR'd e-mail address
+# ("paikynj@gmail.comD 81906028800030" is a real example from a packaged-food label).
+_KNOWN_TLDS = {
+    "com", "in", "org", "net", "co", "edu", "gov", "biz", "info", "io", "us",
+    "uk", "mail", "store", "shop", "online", "site", "tech", "app", "institute",
+}
+
 
 class ExtractedData:
     def __init__(self):
@@ -165,14 +185,32 @@ def extract_fields_from_ocr(items: List[Any], full_text: Optional[str] = None) -
         matched_kw = next((kw for kw in mfg_keywords if kw in line_lower), None)
         if matched_kw:
             mfg_found = True
-            mfg_header_item = items[i]
+            # Attribute the declaration to an OCR item that is actually on this line
+            # (the previous items[i] index pointed at an unrelated word, so the crop
+            # shown to the inspector did not contain the declaration).
+            mfg_header_item = next(
+                (
+                    it for it in items
+                    if len(it.text or "") > 2 and (it.text or "").lower() in line_lower
+                ),
+                items[0],
+            )
             # Name = text after the keyword on the same line ("Marketed by: ACME Ltd")
             # else the following line; cap length to avoid swallowing the page.
             after_kw = line[re.search(re.escape(matched_kw), line_lower).end():].strip(" :,-")
+            name_from_next_line = not after_kw
             mfg_name = after_kw or (text_lines[i + 1] if i + 1 < len(text_lines) else line)
             mfg_name = mfg_name.strip()[:120]
-            address_lines = text_lines[i + 2:i + 5] if i + 2 < len(text_lines) else []
-            full_address = (", ".join(address_lines) if address_lines else mfg_name)[:200]
+
+            # Address = the lines after the name, stopping at the next declaration
+            # block so consumer-care details are never stored as part of the address.
+            address_start = i + 2 if name_from_next_line else i + 1
+            address_lines = []
+            for candidate in text_lines[address_start:address_start + 4]:
+                if _DECLARATION_MARKER_RE.search(candidate):
+                    break
+                address_lines.append(candidate)
+            full_address = ", ".join(address_lines)[:200]
 
             data.set_field("manufacturer_name", mfg_name, mfg_header_item.confidence, mfg_header_item.bbox, line)
             if full_address:
@@ -190,20 +228,46 @@ def extract_fields_from_ocr(items: List[Any], full_text: Optional[str] = None) -
     # 3. Consumer Care Details (Rule 6(2))
     # ----------------------------------------------------
     # Email
-    email_match = re.search(r"([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)", combined_text)
+    email_match = re.search(
+        r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+", combined_text
+    )
     if email_match:
-        email = email_match.group(1).rstrip(".")
-        item_email = next((it for it in items if email[:10] in it.text), items[0])
-        data.set_field("consumer_care_email", email, item_email.confidence, item_email.bbox, item_email.text)
+        email = email_match.group(0).rstrip(".")
+        # OCR commonly glues the following character onto the address, so trailing
+        # characters are trimmed until the top-level domain is one we recognise.
+        while "." in email and email.rsplit(".", 1)[-1].lower() not in _KNOWN_TLDS:
+            email = email[:-1]
+        if "." in email and email.rsplit(".", 1)[-1].lower() in _KNOWN_TLDS:
+            local_part = email.split("@")[0]
+            item_email = next(
+                (it for it in items if local_part and local_part in (it.text or "")), items[0]
+            )
+            data.set_field("consumer_care_email", email, item_email.confidence, item_email.bbox, item_email.text)
 
     # Telephone / Phone
-    phone_match = re.search(r"(?:ph(?:one)?|tel|care|call|customer\s*care|no\.?)[^\d+]*(\+?[\d\s\-()]{7,16})", combined_text, re.IGNORECASE)
-    if phone_match:
-        raw_phone = phone_match.group(1).strip()
-        cleaned_phone = re.sub(r"[^\d+]", "", raw_phone)
-        if len(cleaned_phone) >= 7:
-            item_phone = next((it for it in items if raw_phone[:5] in it.text), items[0])
-            data.set_field("consumer_care_phone", raw_phone, item_phone.confidence, item_phone.bbox, item_phone.text)
+    # Contact keywords must sit on a word boundary and the bare word "no" is not
+    # accepted: on a real label "Lic.No.10717012000120" matched the old pattern and
+    # the FSSAI licence number was stored as the consumer-care telephone number,
+    # which then passed the Rule 6(2) check.
+    phone_regex = re.compile(
+        r"\b(?:phone|ph|telephone|tel|mobile|mob|call|contact|helpline|toll\s*free|"
+        r"customer\s*care|consumer\s*care|care\s*(?:no|number))\b"
+        r"[^\d+]{0,12}?(\(?\+?\d[\d\s\-()]{5,17})",
+        re.IGNORECASE,
+    )
+    for phone_match in phone_regex.finditer(combined_text):
+        raw_phone = phone_match.group(1).strip().strip("- ")
+        digits = re.sub(r"\D", "", raw_phone)
+        # Indian consumer-care numbers carry 7-13 digits including STD or country
+        # code; a 14-digit run is a licence number rather than a telephone number.
+        if not 7 <= len(digits) <= 13:
+            continue
+        item_phone = next(
+            (it for it in items if digits[:5] and digits[:5] in re.sub(r"\D", "", it.text or "")),
+            items[0],
+        )
+        data.set_field("consumer_care_phone", raw_phone, item_phone.confidence, item_phone.bbox, item_phone.text)
+        break
 
     # ----------------------------------------------------
     # 4. Maximum Retail Price (MRP) & Tax Qualification (Rule 6(1)(e))
@@ -214,8 +278,14 @@ def extract_fields_from_ocr(items: List[Any], full_text: Optional[str] = None) -
     )
     mrp_match = mrp_regex.search(combined_text)
     if not mrp_match:
-        # Secondary pattern: standalone Rs. XX.XX or ₹ XX.XX
-        mrp_match = re.search(r"(?:₹|Rs\.?)\s*([0-9]+(?:\.[0-9]{1,2})?)", combined_text)
+        # Secondary pattern: standalone Rs. XX.XX, rs.XX or ₹ XX.XX. The currency token
+        # must not be the tail of another word — without the lookbehind, "Total Sugars
+        # 71.9g" (a nutrition value) becomes a declared MRP of ₹71.90.
+        mrp_match = re.search(
+            r"(?<![A-Za-z])(?:₹|Rs\.?|INR)\s*([0-9]+(?:\.[0-9]{1,2})?)",
+            combined_text,
+            re.IGNORECASE,
+        )
 
     if mrp_match:
         val_str = mrp_match.group(1)
@@ -238,11 +308,24 @@ def extract_fields_from_ocr(items: List[Any], full_text: Optional[str] = None) -
     # ----------------------------------------------------
     # 5. Net Quantity & Units (Rule 6(1)(c), Rule 12(6), Rule 13)
     # ----------------------------------------------------
-    qty_regex = re.compile(
-        r"(?:net\s*(?:wt\.?|weight|qty\.?|quantity)|pkd\.?|volume)?\s*([0-9]+(?:\.[0-9]+)?)\s*(kg|g|gm|gms|gram|grams|ml|l|ltr|litre|litres|liter|liters|n|u)\b",
-        re.IGNORECASE
+    # A declared net quantity must be preceded by a net-quantity keyword (or followed
+    # by "net"/"e"). The previous pattern made the keyword optional, so on a real
+    # basundi-mix label the nutrition-table reference "Per 100gm" was stored as the
+    # declared net quantity. An unreadable net quantity now routes to NEEDS_REVIEW
+    # rather than being replaced by a number taken from the nutrition table.
+    net_qty_regex = re.compile(
+        r"\b(?:net\s*(?:wt\.?|weight|qty\.?|quantity|content|vol\.?|volume)|nett\s*(?:wt|weight)|"
+        r"pkd|packed|quantity|qty)\b"
+        r"[^\d]{0,6}([0-9]+(?:\.[0-9]+)?)\s*"
+        r"(kg|g|gm|gms|gram|grams|ml|l|ltr|litre|litres|liter|liters|n|u)\b",
+        re.IGNORECASE,
     )
-    qty_match = qty_regex.search(combined_text)
+    trailing_net_regex = re.compile(
+        r"([0-9]+(?:\.[0-9]+)?)\s*(kg|g|gm|gms|gram|grams|ml|l|ltr|litre|litres|liter|liters)\s*"
+        r"(?:net|nett|e)\b",
+        re.IGNORECASE,
+    )
+    qty_match = net_qty_regex.search(combined_text) or trailing_net_regex.search(combined_text)
     if qty_match:
         qty_val = float(qty_match.group(1))
         unit = qty_match.group(2).lower()
@@ -250,13 +333,26 @@ def extract_fields_from_ocr(items: List[Any], full_text: Optional[str] = None) -
         data.set_field("net_quantity_value", qty_val, best_qty_item.confidence, best_qty_item.bbox, best_qty_item.text)
         data.set_field("net_quantity_unit", unit, best_qty_item.confidence, best_qty_item.bbox, best_qty_item.text)
 
-    # Check for prohibited vague quantity words (Rule 12(6))
-    vague_words = ["minimum", "not less than", "average", "about", "approximately"]
-    for vw in vague_words:
-        if vw in combined_text.lower():
-            vague_item = next((it for it in items if vw in it.text.lower()), items[0])
-            data.set_field("vague_quantity_found", vw, vague_item.confidence, vague_item.bbox, vague_item.text)
-            break
+    # Check for prohibited vague quantity words (Rule 12(6)).
+    # Rule 12(6) prohibits qualifying words in the *quantity declaration*, so the word
+    # must sit next to a number and unit; matching the word anywhere on the label
+    # raised a non-compliance for unrelated prose ("About this pack", "Average values").
+    vague_regex = re.compile(
+        r"\b(minimum|not\s+less\s+than|average|about|approximately|approx\.?)\b"
+        r"[^\d]{0,12}([0-9]+(?:\.[0-9]+)?)\s*"
+        r"(kg|g|gm|gms|gram|grams|ml|l|ltr|litre|litres|liter|liters|n|u)\b",
+        re.IGNORECASE,
+    )
+    vague_match = vague_regex.search(combined_text)
+    if vague_match:
+        vague_word = vague_match.group(1)
+        vague_item = next(
+            (it for it in items if vague_word.split()[0].lower() in (it.text or "").lower()),
+            items[0],
+        )
+        data.set_field(
+            "vague_quantity_found", vague_word, vague_item.confidence, vague_item.bbox, vague_item.text
+        )
 
     # ----------------------------------------------------
     # 6. Date of Manufacture / Packing / Import (Rule 6(1)(d))
@@ -326,14 +422,36 @@ def extract_fields_from_ocr(items: List[Any], full_text: Optional[str] = None) -
     # 7. Country of Origin (Rule 6(1)(aa))
     # ----------------------------------------------------
     origin_regex = re.compile(
-        r"(?:country\s*of\s*origin|made\s*in|product\s*of)\s*[:\-.]?\s*([a-zA-Z\s]{3,30})",
+        r"(?:country\s*of\s*origin|made\s*in|make\s*in|product\s*of|produce\s*of|manufactured\s*in)"
+        r"\s*[:\-.]?\s*([A-Za-z][A-Za-z\s]{2,30})",
         re.IGNORECASE
     )
     origin_match = origin_regex.search(combined_text)
     if origin_match:
         country = origin_match.group(1).strip()
-        item_origin = next((it for it in items if "origin" in it.text.lower() or "made in" in it.text.lower()), items[0])
-        data.set_field("country_of_origin", country, item_origin.confidence, item_origin.bbox, item_origin.text)
+        # The captured text often runs on into the next declaration; take the shortest
+        # leading run of words that is a recognised country ("Italy Net Wt. 500 g" ->
+        # "Italy", "United States Of America" -> "United States"), and store nothing
+        # when no country can be read rather than recording a fragment as the origin.
+        for word_count in (1, 2, 3):
+            candidate = " ".join(country.split()[:word_count])
+            if is_known_country(candidate):
+                country = candidate
+                break
+        else:
+            country = ""
+        if country:
+            item_origin = next(
+                (
+                    it for it in items
+                    if any(
+                        keyword in (it.text or "").lower()
+                        for keyword in ("origin", "made in", "make in", "product of")
+                    )
+                ),
+                items[0],
+            )
+            data.set_field("country_of_origin", country, item_origin.confidence, item_origin.bbox, item_origin.text)
 
     # ----------------------------------------------------
     # 8. Brand & Product / Generic Name (Rule 6(1)(b))

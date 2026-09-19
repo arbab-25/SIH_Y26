@@ -22,8 +22,7 @@ export const RuleBook: React.FC<RuleBookProps> = ({ initialRule, lang }) => {
   const [activeScheduleTab, setActiveScheduleTab] = useState<'second' | 'table1' | 'fifth'>('second');
   const [scheduleData, setScheduleData] = useState<any>(null);
 
-  const fetchRules = useCallback(async () => {
-    setLoading(true);
+  const fetchRules = useCallback(async (): Promise<{ items: RuleItem[]; selected: RuleItem | null }> => {
     try {
       let url = '/rules';
       const params = new URLSearchParams();
@@ -32,38 +31,57 @@ export const RuleBook: React.FC<RuleBookProps> = ({ initialRule, lang }) => {
       if (params.toString()) url += `?${params.toString()}`;
 
       const res = await api.get(url);
-      setRules(res.data || []);
+      const data: RuleItem[] = res.data || [];
 
+      let selected: RuleItem | null = null;
       if (initialRule) {
-        const matched = res.data.find(
-          (r: RuleItem) => r.rule_number.toLowerCase() === initialRule.toLowerCase()
-        );
-        if (matched) setSelectedRule(matched);
-      } else {
-        setSelectedRule((current) => current ?? res.data[0] ?? null);
+        selected =
+          data.find((r) => r.rule_number.toLowerCase() === initialRule.toLowerCase()) ?? null;
       }
+      return { items: data, selected };
     } catch (err) {
       console.error('Failed to load rules:', err);
+      return { items: [], selected: null };
     } finally {
       setLoading(false);
     }
   }, [initialRule, searchQuery, selectedChapter]);
 
-  const fetchScheduleData = useCallback(async (type: string) => {
-    try {
-      const res = await api.get(`/schedules/${type}`);
-      setScheduleData(res.data);
-    } catch (err) {
-      console.error('Failed to load schedule:', err);
-    }
-  }, []);
+  const fetchScheduleData = useCallback(
+    async (type: string): Promise<any> => {
+      try {
+        const res = await api.get(`/schedules/${type}`);
+        return res.data;
+      } catch (err) {
+        console.error('Failed to load schedule:', err);
+        return null;
+      }
+    },
+    []
+  );
 
+  // Initial/filter load: fetch then commit state together (no setState during the effect body).
   useEffect(() => {
-    void fetchRules();
+    let cancelled = false;
+    void fetchRules().then(({ items, selected }) => {
+      if (cancelled) return;
+      setRules(items);
+      if (selected) setSelectedRule(selected);
+      else setSelectedRule((current) => (current && items.some((r) => r.id === current.id) ? current : items[0] ?? null));
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [fetchRules]);
 
   useEffect(() => {
-    void fetchScheduleData(activeScheduleTab);
+    let cancelled = false;
+    void fetchScheduleData(activeScheduleTab).then((data) => {
+      if (!cancelled) setScheduleData(data);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [activeScheduleTab, fetchScheduleData]);
 
   return (

@@ -22,6 +22,17 @@ _OCR_ENGINE = None
 _OCR_ENGINE_NAME: Optional[str] = None
 
 
+def ocr_thread_count() -> int:
+    """Intra-op thread budget for the ONNX OCR runtime.
+
+    onnxruntime's default thread count left a single 1600x1200 label photo at ~75 s
+    of inference in measurement; pinning intra-op threads to the available cores cut
+    the same image to ~7.5 s. Capped at 4 so the 1 vCPU deployment target is not
+    oversubscribed.
+    """
+    return max(1, min(4, os.cpu_count() or 1))
+
+
 class _RapidOCREngine:
     """Adapter exposing engine(image) -> list[(box, text, score)] for RapidOCR."""
 
@@ -29,7 +40,8 @@ class _RapidOCREngine:
 
     def __init__(self):
         from rapidocr_onnxruntime import RapidOCR
-        self._engine = RapidOCR()
+        self.threads = ocr_thread_count()
+        self._engine = RapidOCR(intra_op_num_threads=self.threads)
 
     def __call__(self, image: np.ndarray):
         results, _elapse = self._engine(image)

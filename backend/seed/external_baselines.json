@@ -1,0 +1,117 @@
+{
+  "meta": {
+    "title": "External reference analysis data used by CODE MAZE",
+    "version": "1.0.0",
+    "generated": "2026-09-19",
+    "sources": [
+      {
+        "id": "paddleocr-v2.7.0-docs",
+        "publisher": "PaddlePaddle",
+        "project": "PaddleOCR (PP-OCR series)",
+        "license": "Apache-2.0",
+        "urls": [
+          "https://github.com/PaddlePaddle/PaddleOCR/blob/v2.7.0/README_en.md",
+          "https://github.com/PaddlePaddle/PaddleOCR/blob/v2.7.0/doc/doc_en/ppocr_introduction_en.md",
+          "https://github.com/PaddlePaddle/PaddleOCR/blob/v2.7.0/doc/doc_en/models_list_en.md"
+        ],
+        "retrieved": "2026-09-19"
+      },
+      {
+        "id": "ppocr-papers",
+        "publisher": "arXiv",
+        "project": "PP-OCR technical reports",
+        "urls": [
+          "https://arxiv.org/abs/2009.09941",
+          "https://arxiv.org/abs/2109.03144",
+          "https://arxiv.org/abs/2206.03001"
+        ],
+        "retrieved": "2026-09-19"
+      },
+      {
+        "id": "tessdoc",
+        "publisher": "Tesseract OCR maintainers",
+        "project": "Tesseract official docs",
+        "license": "Apache-2.0",
+        "urls": [
+          "https://github.com/tesseract-ocr/tessdoc/blob/main/ReleaseNotes.md",
+          "https://github.com/tesseract-ocr/tessdoc/blob/main/Benchmarks.md",
+          "https://github.com/tesseract-ocr/tesseract/blob/5.0.0/ChangeLog"
+        ],
+        "retrieved": "2026-09-19"
+      }
+    ],
+    "usage_note": "These figures are published by the upstream projects, not measured by CODE MAZE. They set expectations for the OCR engines this project uses and are quoted verbatim where possible. Never present them as CODE MAZE accuracy."
+  },
+  "paddleocr": {
+    "pp_ocrv4_release_notes_2023_08_07": {
+      "quote": "PP-OCRv4-mobile: When the speed is comparable, the effect of the Chinese scene is improved by 4.5% compared with PP-OCRv3, the English scene is improved by 10%, and the average recognition accuracy of the 80-language multilingual model is increased by more than 8%. PP-OCRv4-server: Release the OCR model with the highest accuracy at present, the detection model accuracy increased by 4.9% in the Chinese and English scenes, and the recognition model accuracy increased by 2%",
+      "source": "paddleocr-v2.7.0-docs"
+    },
+    "pp_ocrv3_release_2022_05_09": {
+      "quote": "With comparable speed, the effect of Chinese scene is further improved by 5% compared with PP-OCRv2, the effect of English scene is improved by 11%, and the average recognition accuracy of 80 language multilingual models is improved by more than 5%.",
+      "source": "paddleocr-v2.7.0-docs"
+    },
+    "model_sizes_bytes_note": "sizes in MB as published",
+    "model_sizes": [
+      { "model": "PP-OCRv3 ultra-lightweight", "total_mb": 17.0, "detection_mb": 3.6, "direction_classifier_mb": 1.4, "recognition_mb": 12.0 },
+      { "model": "PP-OCRv2 ultra-lightweight", "total_mb": 13.0, "detection_mb": 3.1, "direction_classifier_mb": 1.4, "recognition_mb": 8.5 },
+      { "model": "PP-OCR mobile", "total_mb": 9.4, "detection_mb": 3.0, "direction_classifier_mb": 1.4, "recognition_mb": 5.0 },
+      { "model": "PP-OCR server", "total_mb": 143.4, "detection_mb": 47.1, "direction_classifier_mb": 1.4, "recognition_mb": 94.9 }
+    ],
+    "devanagari_recognition_model": {
+      "model": "devanagari_PP-OCRv3_rec",
+      "size_mb": 9.9,
+      "note": "Dedicated Devanagari recognition model listed in the official multilingual recognition table; relevant to the Hindi label requirement.",
+      "source": "paddleocr-v2.7.0-docs"
+    },
+    "tech_reports": [
+      { "report": "PP-OCR", "arxiv": "2009.09941" },
+      { "report": "PP-OCRv2", "arxiv": "2109.03144" },
+      { "report": "PP-OCRv3", "arxiv": "2206.03001" }
+    ]
+  },
+  "tesseract": {
+    "release_facts": [
+      { "version": "4.0.0", "date": "2018-10-29", "fact": "Added new neural network system based on LSTMs, with major accuracy gains.", "source": "tessdoc ChangeLog 5.0.0" },
+      { "version": "5.0.0", "date": "2021-11-22", "fact": "Faster training and recognition by default (float instead of double calculations); more options for binarization.", "source": "tessdoc ChangeLog 5.0.0" },
+      { "version": "5.5.3", "date": "2026-07-24", "fact": "Current release line per official ReleaseNotes index.", "source": "tessdoc ReleaseNotes" }
+    ],
+    "official_benchmark": {
+      "description": "Single-image recognition timing, average of 15 runs, Windows 10, VS 2019, Intel Core i7-10750H @ 2.60GHz (6 cores); seconds per inference as published.",
+      "environment_note": "Published by the Tesseract maintainers in tessdoc/Benchmarks.md; not re-measured by CODE MAZE.",
+      "rows": [
+        { "build": "3.05 (legacy engine)", "tessdata_best_s": null, "tessdata_fast_s": null, "tessdata_default_s": 2.4713 },
+        { "build": "4.1.3 no AVX", "tessdata_best_s": 37.6052, "tessdata_fast_s": 5.1589, "tessdata_default_s": 10.1519 },
+        { "build": "4.1.3 AVX2/AVX/SSE4", "tessdata_best_s": 12.73, "tessdata_fast_s": 2.9538, "tessdata_default_s": 4.086 },
+        { "build": "5.0.1 AVX2", "tessdata_best_s": 6.1981, "tessdata_fast_s": 2.1241, "tessdata_default_s": 2.9107 },
+        { "build": "5.0.1 AVX2 + OpenMP", "tessdata_best_s": 3.459, "tessdata_fast_s": 1.9612, "tessdata_default_s": 2.3554 }
+      ]
+    }
+  },
+  "lmpr_2011_reference_points": {
+    "note": "Structural reference points the rule engine relies on. The authoritative text lives in backend/seed/rules.json parsed from the repository's RULE_BOOK.pdf; these pointers only record which rules the checkers implement.",
+    "mandatory_retail_declarations_rule_6_1": [
+      "rule-6-1-a manufacturer/packer/importer name and address",
+      "rule-6-1-aa country of origin for imported packages",
+      "rule-6-1-b common or generic name of the commodity",
+      "rule-6-1-c net quantity in prescribed units",
+      "rule-6-1-d month and year of manufacture/pre-packing/import",
+      "rule-6-1-da best-before / use-by where applicable",
+      "rule-6-1-e retail sale price (MRP) inclusive of all taxes",
+      "rule-6-1-f dimensions where size is relevant"
+    ],
+    "supporting_rules_implemented": [
+      "rule-3 applicability and exemptions",
+      "rule-5 second-schedule standard pack sizes",
+      "rule-6-2 consumer-care declarations",
+      "rule-7-2 / rule-7-3 / rule-7-4 letter-height and PDP area",
+      "rule-8-1 clearance around quantity declaration",
+      "rule-9-1-b / rule-9-4 contrast and language of declarations",
+      "rule-12-6 prohibition of vague quantity words",
+      "rule-13 units of measurement",
+      "rule-24 wholesale packages",
+      "rule-26 exempt packages",
+      "rule-32 / rule-32A penalties (display-only context)"
+    ]
+  }
+}

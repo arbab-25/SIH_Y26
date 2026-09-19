@@ -16,7 +16,6 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { ScanResult, User } from './types';
 import { api } from './utils/api';
 import { getPendingScansCount } from './utils/offlineQueue';
-import { translations } from './i18n/translations';
 
 export function App() {
   const [activeTab, setActiveTab] = useState<string>('scan');
@@ -34,8 +33,6 @@ export function App() {
   // Latest Scan Data
   const [currentScan, setCurrentScan] = useState<ScanResult | null>(null);
   const [ruleDeepLink, setRuleDeepLink] = useState<string | null>(null);
-
-  const t = translations[lang];
 
   const openLogin = useCallback((notice?: string) => {
     setLoginNotice(notice || null);
@@ -68,7 +65,7 @@ export function App() {
     };
     window.addEventListener('cmd_trigger_login', handleTriggerLogin);
     return () => window.removeEventListener('cmd_trigger_login', handleTriggerLogin);
-  }, [getPendingScansCount, openLogin, lang]);
+  }, [openLogin, lang]);
 
   const handleToggleLang = () => {
     const next = lang === 'en' ? 'hi' : 'en';
@@ -170,13 +167,7 @@ export function App() {
           )}
 
           {activeTab === 'reports' && (
-            <ReportHistory
-              onViewReport={(_repNum) => {
-                // Navigate to view report
-                setActiveTab('analysis');
-              }}
-              lang={lang}
-            />
+            <ReportHistory lang={lang} />
           )}
 
           {activeTab === 'history' && (

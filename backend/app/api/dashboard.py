@@ -7,10 +7,22 @@ from sqlalchemy import select, func, desc
 
 from app.database import get_db
 from app.models.scan import Scan, Verdict
+from app.models.rule import Rule
 from app.models.violation import Violation
 from app.models.product import Product
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
+
+
+def _rule_label(rule_number: str | None, field_key: str) -> str:
+    """Render a seeded rule number as inspectors cite it ('Rule 6(1)(e)').
+
+    Falls back to the declaration name when the violation predates rule linking.
+    """
+    if not rule_number:
+        return f"Rule {field_key.replace('_', ' ').title()}"
+    parts = rule_number.replace("rule-", "").split("-")
+    return f"Rule {parts[0]}{''.join(f'({p})' for p in parts[1:])}"
 
 
 @router.get("/stats")
@@ -40,10 +52,13 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
     scans_month = month_res.scalar() or 0
 
     # Average OCR confidence
+    # Real average only: a placeholder percentage here would report an OCR quality
+    # figure that no scan produced.
     avg_conf_res = await db.execute(
         select(func.avg(Scan.avg_ocr_confidence)).where(Scan.avg_ocr_confidence != None)
     )
-    avg_ocr_confidence = round(float(avg_conf_res.scalar() or 88.5), 2)
+    avg_conf_value = avg_conf_res.scalar()
+    avg_ocr_confidence = round(float(avg_conf_value), 2) if avg_conf_value is not None else 0.0
 
     # Total Scans & Verdict breakdown
     total_res = await db.execute(select(func.count(Scan.id)))
@@ -64,30 +79,24 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
     )
     needs_rev_count = needs_rev_res.scalar() or 0
 
-    # Top Violated Rules (Bar chart data)
+    # Top Violated Rules (Bar chart data) — grouped by the exact rule the checker
+    # cited, so the chart names the statutory rule rather than the field name.
+    # An empty result stays empty: invented counts must never be shown as enforcement
+    # statistics for a government inspection workspace.
     viol_res = await db.execute(
-        select(Violation.field_key, func.count(Violation.id).label("cnt"))
-        .group_by(Violation.field_key)
+        select(Violation.field_key, Rule.rule_number, func.count(Violation.id).label("cnt"))
+        .join(Rule, Violation.rule_id == Rule.id, isouter=True)
+        .group_by(Violation.field_key, Rule.rule_number)
         .order_by(desc("cnt"))
         .limit(6)
     )
     top_violations = []
-    for row in viol_res.all():
-        rule_label = f"Rule {row[0].replace('_', ' ').title()}"
+    for field_key, rule_number, count in viol_res.all():
         top_violations.append({
-            "rule": rule_label,
-            "field": row[0],
-            "violations_count": row[1]
+            "rule": _rule_label(rule_number, field_key),
+            "field": field_key,
+            "violations_count": count
         })
-
-    if not top_violations:
-        top_violations = [
-            {"rule": "Rule 6(1)(e) MRP Declarations", "field": "mrp", "violations_count": 14},
-            {"rule": "Rule 6(1)(d) Month & Year", "field": "mfg_date", "violations_count": 9},
-            {"rule": "Rule 10(1) Complete Address & PIN", "field": "address", "violations_count": 7},
-            {"rule": "Rule 13 SI Units Format", "field": "si_units", "violations_count": 5},
-            {"rule": "Rule 5 Standard Pack Sizes", "field": "pack_size", "violations_count": 4},
-        ]
 
     # Top Non-Compliant Manufacturers
     mfg_stmt = (
@@ -106,24 +115,43 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
             "violations_count": row[1]
         })
 
-    if not top_non_compliant_mfgs:
-        top_non_compliant_mfgs = [
-            {"manufacturer": "Apex Consumer Goods Ltd", "violations_count": 4},
-            {"manufacturer": "Sunrise Foods & Confectionery", "violations_count": 3},
-            {"manufacturer": "Global Imports Pvt Ltd", "violations_count": 2},
-        ]
+    # Compliance Trend (Line chart data for the past 7 days), aggregated from the
+    # recorded scans themselves. Days with no inspections report zero.
+    trend_res = await db.execute(
+        select(
+            func.date(Scan.created_at).label("day"),
+            Scan.verdict,
+            func.count(Scan.id).label("cnt"),
+        )
+        .where(Scan.created_at >= today_start - timedelta(days=6))
+        .group_by("day", Scan.verdict)
+    )
 
-    # Compliance Trend (Line chart data for the past 7 days)
+    buckets: dict[str, dict[str, int]] = {}
+    for day_value, verdict_value, count in trend_res.all():
+        bucket = buckets.setdefault(
+            str(day_value)[:10],
+            {"compliant": 0, "non_compliant": 0, "needs_review": 0},
+        )
+        verdict_key = getattr(verdict_value, "value", verdict_value)
+        if verdict_key == Verdict.COMPLIANT.value:
+            bucket["compliant"] += count
+        elif verdict_key == Verdict.NON_COMPLIANT.value:
+            bucket["non_compliant"] += count
+        elif verdict_key == Verdict.NEEDS_REVIEW.value:
+            bucket["needs_review"] += count
+
     compliance_trend = []
-    for i in range(6, -1, -1):
-        day = today_start - timedelta(days=i)
-        day_str = day.strftime("%d %b")
-        compliance_trend.append({
-            "date": day_str,
-            "compliant": max(1, (i * 3 + 2) % 7),
-            "non_compliant": max(0, (i * 2 + 1) % 4),
-            "needs_review": max(0, (i + 1) % 3),
-        })
+    if buckets:
+        for i in range(6, -1, -1):
+            day = today_start - timedelta(days=i)
+            bucket = buckets.get(day.strftime("%Y-%m-%d"))
+            compliance_trend.append({
+                "date": day.strftime("%d %b"),
+                "compliant": bucket["compliant"] if bucket else 0,
+                "non_compliant": bucket["non_compliant"] if bucket else 0,
+                "needs_review": bucket["needs_review"] if bucket else 0,
+            })
 
     return {
         "scans_today": scans_today,

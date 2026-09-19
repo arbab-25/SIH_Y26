@@ -1,6 +1,6 @@
 """Pydantic schemas for auth endpoints."""
 
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
 from typing import Optional
 from uuid import UUID
 from datetime import datetime
@@ -57,6 +57,8 @@ class TokenResponse(BaseModel):
 
 
 class UserResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     name: str
     email: Optional[str] = None
@@ -69,9 +71,6 @@ class UserResponse(BaseModel):
     is_active: bool
     created_at: datetime
     last_login: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True
 
 
 class AuthResponse(BaseModel):

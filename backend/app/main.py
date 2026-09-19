@@ -5,6 +5,7 @@ Sets up CORS + security headers, includes API routers, and provides a runnable e
 """
 
 import os
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
@@ -14,10 +15,30 @@ import uvicorn
 from app.config import settings
 from app.api import auth, health, rules, scans, reports, dashboard
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Load the OCR model once at boot so no scan request pays for model loading.
+
+    A warm-up failure is logged only: the service still starts and /health reports
+    whether an engine is loaded (a scan without one returns a review verdict rather
+    than a fabricated result).
+    """
+    from app.services.ocr_service import get_ocr_engine, get_ocr_engine_name
+
+    try:
+        get_ocr_engine()
+        print(f"[OK] OCR engine ready at startup: {get_ocr_engine_name()}")
+    except Exception as exc:
+        print(f"[WARN] OCR engine warm-up failed: {exc}")
+    yield
+
+
 app = FastAPI(
     title="CODE MAZE",
     description="Legal Metrology compliance checker for government inspectors",
     version=settings.APP_VERSION,
+    lifespan=lifespan,
     # Interactive docs only when explicitly enabled (disable debug mode in production)
     docs_url="/docs" if settings.DEBUG else None,
     redoc_url="/redoc" if settings.DEBUG else None,

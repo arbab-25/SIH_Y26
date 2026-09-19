@@ -15,23 +15,33 @@ export const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const fetchStats = useCallback(async () => {
-    setLoading(true);
-    setLoadError(null);
+  // Pure data fetch — no setState inside, so effects can call it safely.
+  const loadStats = useCallback(async (): Promise<{ data: DashboardStats | null; error: string | null }> => {
     try {
       const res = await api.get('/dashboard/stats');
-      setStats(res.data);
+      return { data: res.data as DashboardStats, error: null };
     } catch (err) {
       console.error('Failed to load dashboard stats:', err);
-      setLoadError('Inspection analytics could not be loaded. Check the service connection and try again.');
-    } finally {
-      setLoading(false);
+      return { data: null, error: 'Inspection analytics could not be loaded. Check the service connection and try again.' };
     }
   }, []);
 
+  const applyStats = useCallback((result: { data: DashboardStats | null; error: string | null }) => {
+    setStats(result.data);
+    setLoadError(result.error);
+    setLoading(false);
+  }, []);
+
+  // Initial load: fetch then commit state together (no setState during the effect body).
   useEffect(() => {
-    void fetchStats();
-  }, [fetchStats]);
+    let cancelled = false;
+    void loadStats().then((result) => {
+      if (!cancelled) applyStats(result);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadStats, applyStats]);
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -42,7 +52,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
           <h1 className="text-2xl font-extrabold text-[#12355B]">{t.navDashboard}</h1>
           <p className="text-sm text-slate-600 mt-2">Inspection volumes, OCR quality, and rule trends from recorded scans.</p>
         </div>
-        <button onClick={() => void fetchStats()} disabled={loading} className="btn-secondary shrink-0">
+        <button
+          onClick={() => {
+            setLoading(true);
+            setLoadError(null);
+            void loadStats().then((result) => applyStats(result));
+          }}
+          disabled={loading}
+          className="btn-secondary shrink-0"
+        >
           <RefreshCw size={16} className={loading ? 'animate-spin' : ''} /> Refresh data
         </button>
       </div>

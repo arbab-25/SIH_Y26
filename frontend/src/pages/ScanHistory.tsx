@@ -15,20 +15,27 @@ export const ScanHistory: React.FC<ScanHistoryProps> = ({ onSelectScan, lang }) 
   const [loading, setLoading] = useState(false);
   const [rerunningId, setRerunningId] = useState<string | null>(null);
 
-  const fetchScans = useCallback(async () => {
-    setLoading(true);
+  const fetchScans = useCallback(async (): Promise<any[]> => {
     try {
       const res = await api.get('/scans?page=1&size=20');
-      setScans(res.data?.items || []);
+      return (res.data?.items || []) as any[];
     } catch (err) {
       console.error('Failed to load scans:', err);
+      return [];
     } finally {
       setLoading(false);
     }
   }, []);
 
+  // Initial load: fetch then commit state together (no setState during the effect body).
   useEffect(() => {
-    void fetchScans();
+    let cancelled = false;
+    void fetchScans().then((items) => {
+      if (!cancelled) setScans(items);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [fetchScans]);
 
   const handleRerun = async (id: string) => {

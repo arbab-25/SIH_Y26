@@ -124,7 +124,13 @@ export const ScanSummary: React.FC<ScanSummaryProps> = ({
   };
 
   const pieData = scan.confidence_pie?.length > 0 ? scan.confidence_pie : [];
+  const violations = scan.violations ?? [];
   const nonCompliantCount = scan.extracted_fields?.filter((f) => f.status === 'NON_COMPLIANT').length ?? 0;
+  // A declaration the engine found missing (for example an absent best before date,
+  // or a manufacturer with no PIN code) has no extracted-field row of its own, so the
+  // failed-declaration count must consider violations too — otherwise a scan the engine
+  // rejected would still read as "all declarations are compliant" here.
+  const failedDeclarationCount = Math.max(violations.length, nonCompliantCount);
 
   if (compact) {
     // Compact inline variant shown directly beneath the Scan / Upload workspace
@@ -164,13 +170,13 @@ export const ScanSummary: React.FC<ScanSummaryProps> = ({
           </div>
 
           {/* Violation summary — non-compliances highlighted red */}
-          {nonCompliantCount > 0 ? (
+          {failedDeclarationCount > 0 ? (
             <div className="flex items-start gap-2.5 p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 font-semibold">
               <AlertTriangle size={16} className="text-rose-600 shrink-0 mt-0.5" />
               <span>
                 {lang === 'hi'
-                  ? `${nonCompliantCount} घोषणाएँ नियमों का उल्लंघन करती हैं (लाल रंग में चिह्नित)।`
-                  : `${nonCompliantCount} declaration${nonCompliantCount === 1 ? '' : 's'} violate statutory rules — highlighted in red below.`}
+                  ? `${failedDeclarationCount} घोषणाएँ नियमों का उल्लंघन करती हैं (लाल रंग में चिह्नित)।`
+                  : `${failedDeclarationCount} declaration${failedDeclarationCount === 1 ? '' : 's'} violate statutory rules — highlighted in red below.`}
               </span>
             </div>
           ) : (
@@ -180,6 +186,35 @@ export const ScanSummary: React.FC<ScanSummaryProps> = ({
                 {lang === 'hi' ? 'सभी स्कैन की गई घोषणाएँ अनुपालित हैं।' : 'All scanned declarations are compliant.'}
               </span>
             </div>
+          )}
+
+          {/* Cited rule breaches, including declarations the engine found missing */}
+          {violations.length > 0 && (
+            <ul className="space-y-2">
+              {violations.map((v, i) => (
+                <li
+                  key={v.id ?? `${v.field_key}-${i}`}
+                  className="p-3 rounded-xl border border-rose-200 bg-white/80 text-xs"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-bold text-rose-700 uppercase tracking-wider">
+                      {v.rule_ref?.toUpperCase()}
+                    </span>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-rose-100 text-rose-800">
+                      {v.severity}
+                    </span>
+                  </div>
+                  <p className="text-rose-900 font-semibold mt-1">
+                    {lang === 'hi' && v.message_hi ? v.message_hi : v.message_en}
+                  </p>
+                  {v.suggested_fix && (
+                    <p className="text-[#0E7490] font-bold mt-1">
+                      {t.suggestedFix}: {v.suggested_fix}
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ul>
           )}
 
           {/* Key extracted fields with red highlighting on non-compliance */}

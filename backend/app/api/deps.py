@@ -33,6 +33,29 @@ async def get_current_user(
     return user
 
 
+async def get_optional_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    db: AsyncSession = Depends(get_db),
+) -> User | None:
+    """Returns the signed-in user, or None when no token is supplied.
+
+    Used by resources that are readable both by a signed-in inspector and through
+    their own unguessable share token (e.g. a read-only report link). An invalid or
+    expired token is still rejected rather than silently treated as anonymous.
+    """
+    if not credentials:
+        return None
+    payload = decode_access_token(credentials.credentials)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    user = await get_user_by_id(db, payload["sub"])
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="Account is deactivated")
+    return user
+
+
 async def require_admin(user: User = Depends(get_current_user)) -> User:
     """Requires ADMIN role."""
     if user.role != UserRole.ADMIN:
