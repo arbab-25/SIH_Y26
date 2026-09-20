@@ -31,6 +31,35 @@ async def lifespan(app: FastAPI):
         print(f"[OK] OCR engine ready at startup: {get_ocr_engine_name()}")
     except Exception as exc:
         print(f"[WARN] OCR engine warm-up failed: {exc}")
+
+    # Orphan sweep: background scans live in this process's memory, so a platform
+    # restart (OOM, deploy) leaves rows stuck in QUEUED/PROCESSING forever — the
+    # poller would spin until the client timeout with no answer. Mark them FAILED
+    # at boot so inspectors get a clear retry message instead of a hang.
+    try:
+        from sqlalchemy import update
+        from app.database import async_session_factory
+        from app.models.scan import Scan, ScanStatus, Verdict
+
+        async with async_session_factory() as session:
+            result = await session.execute(
+                update(Scan)
+                .where(Scan.status.in_([ScanStatus.QUEUED, ScanStatus.PROCESSING]))
+                .values(
+                    status=ScanStatus.FAILED,
+                    verdict=Verdict.NEEDS_REVIEW,
+                    error_message=(
+                        "Processing was interrupted by a server restart. "
+                        "Please scan the label again."
+                    ),
+                )
+            )
+            await session.commit()
+            if result.rowcount:
+                print(f"[OK] Marked {result.rowcount} interrupted scan(s) as failed at startup.")
+    except Exception as exc:
+        print(f"[WARN] Startup orphan sweep failed: {exc}")
+
     yield
 
 

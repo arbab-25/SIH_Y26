@@ -76,6 +76,16 @@ async def _process_scan(
                     if meta.get("blurry"):
                         is_any_blurry = True
                         blur_error_msg = meta.get("error")
+                    if meta.get("error") and not meta.get("blurry"):
+                        # Engine-level fault (e.g. ONNX inference failure with no
+                        # surviving fallback): fail the scan explicitly rather
+                        # than recording a silent zero-field "done".
+                        scan.status = ScanStatus.FAILED
+                        scan.verdict = Verdict.NEEDS_REVIEW
+                        scan.error_message = meta.get("error")
+                        scan.processing_time_ms = int((time.time() - start_time) * 1000)
+                        await db.commit()
+                        return
                     all_ocr_items.extend(items)
                     combined_metadata = meta
                 except Exception as e:

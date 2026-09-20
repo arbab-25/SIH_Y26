@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     # fine at this size; beyond it, inference memory and time explode on small
     # instances (Render free tier OOM-kills the worker mid-request -> HTTP 502).
     OCR_MAX_DIMENSION: int = 1200
+    # Intra-op threads for the ONNX OCR runtime. On tiny instances (0.1 CPU)
+    # multi-threaded ONNX starves the event loop: health checks time out and
+    # the platform restarts the service, orphaning in-flight scans. 1 thread
+    # is slower per image but keeps the service responsive.
+    OCR_THREADS: int = 1
 
     # CORS – defaults include the deployed frontend so a missing env var can never lock out users
     CORS_ORIGINS: str = (

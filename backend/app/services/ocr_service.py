@@ -26,10 +26,14 @@ def ocr_thread_count() -> int:
     """Intra-op thread budget for the ONNX OCR runtime.
 
     onnxruntime's default thread count left a single 1600x1200 label photo at ~75 s
-    of inference in measurement; pinning intra-op threads to the available cores cut
-    the same image to ~7.5 s. Capped at 4 so the 1 vCPU deployment target is not
-    oversubscribed.
+    of inference in measurement. Capped at 4 so the 1 vCPU deployment target is not
+    oversubscribed — and configurable down to 1 via OCR_THREADS: on a 0.1-CPU free-
+    tier instance multi-threaded ONNX starved the event loop until health checks
+    failed and the platform restarted the service mid-scan.
     """
+    configured = getattr(settings, "OCR_THREADS", 0) or 0
+    if configured > 0:
+        return configured
     return max(1, min(4, os.cpu_count() or 1))
 
 
@@ -74,6 +78,14 @@ class _TesseractEngine:
             box = [[x, y], [x + bw, y], [x + bw, y + bh], [x, y + bh]]
             results.append((box, text, conf / 100.0))
         return results
+
+    def available(self) -> bool:
+        """Probe whether the tesseract binary is usable on this host."""
+        try:
+            self(np.zeros((40, 120), dtype=np.uint8))
+            return True
+        except Exception:
+            return False
 
 
 def get_ocr_engine():
@@ -184,14 +196,41 @@ def run_ocr(
         return [], {"error": "OCR engine not available on server. Contact the administrator."}
 
     items: List[OCRItem] = []
+    used_engine_name = engine.name
+    ocr_runtime_error: Optional[str] = None
     try:
-        results = engine(enhanced)
-    except Exception:
         try:
+            results = engine(enhanced)
+        except Exception:
+            # Retry once on the raw image (preprocessing occasionally breaks
+            # detection on unusual crops).
             results = engine(image)
-        except Exception as e:
-            print(f"[WARN] OCR execution failed: {e}")
-            results = None
+    except Exception as primary_error:
+        # Inference-level fallback: on the small deployment instance the ONNX
+        # runtime can fail mid-call (memory pressure), which used to fail the
+        # whole scan. Tesseract runs as a small external process, so it survives
+        # conditions that kill in-process ONNX inference. Metadata records the
+        # engine that actually produced the text.
+        results = None
+        if engine.name != "tesseract":
+            try:
+                fallback = _TesseractEngine()
+                if fallback.available():
+                    print(f"[WARN] {engine.name} inference failed ({primary_error}); falling back to tesseract.")
+                    results = fallback(enhanced)
+                    used_engine_name = fallback.name
+            except Exception as fb_error:
+                print(f"[WARN] Tesseract fallback also failed: {fb_error}")
+        if results is None:
+            print(f"[WARN] OCR execution failed: {primary_error}")
+            # Distinguish "engine read nothing" from "engine could not run":
+            # without this the scan completed 'done' with zero fields and the
+            # inspector could not tell an unreadable label from a server fault.
+            ocr_runtime_error = (
+                "The text-recognition engine failed to process this image on "
+                "the server. Please retry; if it keeps failing, try a smaller "
+                "or clearer photo."
+            )
 
     if results:
         for entry in results:
@@ -224,8 +263,9 @@ def run_ocr(
     metadata = {
         "blurry": False,
         "blur_score": blur_score,
-        "engine": engine.name,
+        "engine": used_engine_name,
         "total_words": len(items),
+        **(({"error": ocr_runtime_error}) if ocr_runtime_error else {}),
         "avg_confidence": round(avg_conf, 2),
         "confidence_distribution": [
             {"name": "High (≥90%)", "value": high_count, "color": "#16A34A"},
