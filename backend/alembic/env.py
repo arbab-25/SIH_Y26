@@ -1,8 +1,10 @@
-"""Alembic env.py — connects migrations to our SQLAlchemy models.
+"""Alembic env.py — connects migrations to our SQLAlchemy models."""
 
 from logging.config import fileConfig
+
 from sqlalchemy import engine_from_config, pool
 from alembic import context
+
 import os
 import sys
 
@@ -10,6 +12,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.database import Base
+
 # Import all models so Alembic can detect them
 from app.models import *  # noqa: F401, F403
 
@@ -17,9 +20,9 @@ from app.config import settings
 
 config = context.config
 
-# Override sqlalchemy.url with environment variable if available.
-# pg8000 is the sync driver in this project (psycopg2 is deliberately not
-# installed — see requirements.txt). Do not switch to the bare postgresql://
+# Override sqlalchemy.url with the environment-derived value. Keep the
+# postgresql+pg8000:// dialect: psycopg2 is deliberately not installed
+# (see requirements.txt), so never rewrite this to the bare postgresql://
 # psycopg2 dialect.
 database_url = settings.DATABASE_URL_SYNC
 if database_url:
@@ -45,16 +48,16 @@ def run_migrations_offline() -> None:
 
 
 def _remote_ssl_config(url: str) -> dict:
-    """Return connect_args for a remote Postgres (Neon/Render) TLS connection.
+    """Return connect_args for a remote Postgres TLS connection.
 
-    pg8000's connect() parameter is 'ssl_context' (an ssl.SSLContext) — it does
-    NOT accept libpq-style 'sslmode' or a bare 'ssl' kwarg. Mirrors
-    app/database.py (CERT_NONE so self-signed and managed-Postgres TLS both
-    work without certificate verification).
+    pg8000's connect() parameter is 'ssl_context' (an ssl.SSLContext) — it
+    does not accept libpq-style 'sslmode'. Mirrors app/database.py: CERT_NONE
+    so managed Postgres (Neon/Render) TLS works without certificate files.
     """
     if "localhost" in url or "127.0.0.1" in url:
         return {}
     import ssl
+
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
