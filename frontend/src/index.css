@@ -1,0 +1,159 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Devanagari:wght@400;500;600;700&family=Noto+Sans:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===== DESIGN TOKENS (§4) ===== */
+:root {
+  --navy: #12355B;
+  --teal: #0E7490;
+  --bg: #F8FAFC;
+  --card: #FFFFFF;
+  --text: #172033;
+  --success: #16A34A;
+  --warning: #D97706;
+  --error: #DC2626;
+}
+
+/* ===== BASE ===== */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(circle at 90% -10%, rgba(14, 116, 144, 0.10), transparent 32rem),
+    linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  color: var(--text);
+  font-family: 'Inter', 'Noto Sans', 'Noto Sans Devanagari', sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100dvh;
+}
+
+button {
+  font: inherit;
+}
+
+::selection {
+  background: rgba(14, 116, 144, 0.18);
+  color: #12355B;
+}
+
+/* ===== ACCESSIBILITY - WCAG AA tap targets ===== */
+button, a, input, select, textarea {
+  touch-action: manipulation;
+}
+
+/* Keyboard focus rings (§12) */
+:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ===== CUSTOM SCROLLBAR ===== */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: #F1F5F9; }
+::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
+
+/* ===== TAILWIND COMPONENT LAYER ===== */
+@layer components {
+  /* Card component — white, rounded, shadow, border */
+  .cm-card {
+    @apply bg-white rounded-2xl border border-slate-200 shadow-sm;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 10px 24px rgba(15, 23, 42, 0.035);
+  }
+
+  /* Verdict status chips — always colour + icon + text (WCAG) */
+  .verdict-compliant {
+    @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold
+           bg-emerald-50 text-emerald-800 border border-emerald-200;
+  }
+  .verdict-noncompliant {
+    @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold
+           bg-rose-50 text-rose-800 border border-rose-200;
+  }
+  .verdict-review {
+    @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold
+           bg-amber-50 text-amber-800 border border-amber-200;
+  }
+
+  /* Primary CTA — Navy */
+  .btn-primary {
+    @apply flex items-center justify-center gap-2 px-5 py-3 bg-[#12355B] hover:bg-[#0F2C4C]
+           text-white text-sm font-bold rounded-xl shadow-md transition-all
+           min-h-[44px] disabled:opacity-50 disabled:cursor-not-allowed;
+    box-shadow: 0 8px 16px rgba(18, 53, 91, 0.16);
+  }
+
+  /* Secondary CTA — Teal outline */
+  .btn-secondary {
+    @apply flex items-center justify-center gap-2 px-4 py-2.5 border border-[#0E7490]
+           text-[#0E7490] hover:bg-cyan-50 text-sm font-semibold rounded-xl transition-colors
+           min-h-[44px];
+  }
+
+  /* Form input */
+  .cm-input {
+    @apply w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm
+           font-medium focus:bg-white focus:border-[#0E7490] focus:ring-1 focus:ring-[#0E7490]
+           outline-none transition-all min-h-[44px];
+  }
+
+  /* Section header */
+  .section-header {
+    @apply text-xs font-bold text-slate-500 uppercase tracking-widest mb-3;
+  }
+}
+
+/* ===== UTILITY LAYER ===== */
+@layer utilities {
+  /* Bilingual support — Devanagari rendering */
+  .font-devanagari {
+    font-family: 'Noto Sans Devanagari', 'Noto Sans', sans-serif;
+  }
+
+  /* Gradient backgrounds */
+  .gradient-navy-teal {
+    background: linear-gradient(135deg, #12355B 0%, #0E7490 100%);
+  }
+
+  /* Text gradient */
+  .text-gradient-navy {
+    background: linear-gradient(90deg, #12355B, #0E7490);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Glassmorphism effect for overlays */
+  .glass {
+    backdrop-filter: blur(12px) saturate(1.5);
+    background: rgba(255, 255, 255, 0.85);
+  }
+
+  /* Reduced motion support (§12) */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+  /* Stagger animation delays for lists */
+  .stagger-1 { animation-delay: 50ms; }
+  .stagger-2 { animation-delay: 100ms; }
+  .stagger-3 { animation-delay: 150ms; }
+  .stagger-4 { animation-delay: 200ms; }
+}

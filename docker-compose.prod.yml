@@ -1,0 +1,65 @@
+version: "3.9"
+
+services:
+  # ── PostgreSQL Database ──────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: codemaze-db
+    environment:
+      POSTGRES_USER: codemaze
+      POSTGRES_PASSWORD: codemaze
+      POSTGRES_DB: codemaze
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── FastAPI Backend ──────────────────────────────
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file: ./backend/.env
+    container_name: codemaze-backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://codemaze:codemaze@db:5432/codemaze
+      DATABASE_URL_SYNC: postgresql+pg8000://codemaze:codemaze@db:5432/codemaze
+      JWT_SECRET: dev-secret-change-in-production
+      CORS_ORIGINS: "*"
+      STORAGE_BACKEND: local
+      OCR_ENGINE: tesseract
+      OCR_CONFIDENCE_THRESHOLD: "0.75"
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    command: >
+      sh -c "alembic upgrade head &&
+             python seed/seed_db.py &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+
+  # ── React Frontend (NGINX) ───────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: codemaze-frontend
+    ports:
+      - "80:80"
+    environment:
+      VITE_API_BASE_URL: http://api:8000/api/v1
+    depends_on:
+      - api
+    # No source-volume mounts – the image contains the built assets.
+
+volumes:
+  pgdata:
+  uploads:
