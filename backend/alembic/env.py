@@ -1,4 +1,4 @@
-"""Alembic env.py — connects migrations to our SQLAlchemy models."""
+"""Alembic env.py — connects migrations to our SQLAlchemy models.
 
 from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool
@@ -17,12 +17,12 @@ from app.config import settings
 
 config = context.config
 
-# Override sqlalchemy.url with environment variable if available
+# Override sqlalchemy.url with environment variable if available.
+# pg8000 is the sync driver in this project (psycopg2 is deliberately not
+# installed — see requirements.txt). Do not switch to the bare postgresql://
+# psycopg2 dialect.
 database_url = settings.DATABASE_URL_SYNC
 if database_url:
-    # Switch from pg8000 to psycopg2 to fix Neon SSL issues natively
-    if "postgresql+pg8000://" in database_url:
-        database_url = database_url.replace("postgresql+pg8000://", "postgresql://")
     config.set_main_option("sqlalchemy.url", database_url)
 
 if config.config_file_name is not None:
@@ -44,12 +44,25 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
+def _remote_ssl_config(url: str) -> dict:
+    """Return connect_args for a remote Postgres (Neon/Render) TLS connection.
+
+    Mirrors the logic in app/database.py so migrations and the app use the same
+    TLS semantics. pg8000 honours 'sslmode' through connect_args.
+    """
+    if "localhost" in url or "127.0.0.1" in url:
+        return {}
+    return {"sslmode": "require"}
+
+
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode."""
+    url = config.get_main_option("sqlalchemy.url") or ""
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args=_remote_ssl_config(url),
     )
     with connectable.connect() as connection:
         context.configure(

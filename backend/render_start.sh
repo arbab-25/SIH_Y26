@@ -41,7 +41,15 @@ import os, sys
 try:
     import sqlalchemy
     url = os.environ['DATABASE_URL_SYNC']
-    eng = sqlalchemy.create_engine(url, connect_args={'sslmode': 'require'} if 'sslmode' not in url and 'localhost' not in url and '127.0.0.1' not in url else {})
+    # Normalize to a sqlalchemy dialect form it recognises. pg8000 is the sync
+    # driver in this project — psycopg2 is deliberately NOT installed (see
+    # requirements.txt), so 'postgresql://' (psycopg2) must never be used here.
+    if url.startswith('postgresql://') and '+' not in url:
+        url = 'postgresql+pg8000://' + url[len('postgresql://'):]
+    connect_args = {}
+    if 'localhost' not in url and '127.0.0.1' not in url:
+        connect_args['sslmode'] = 'require'
+    eng = sqlalchemy.create_engine(url, connect_args=connect_args)
     with eng.connect() as c:
         c.exec_driver_sql('SELECT 1')
     sys.exit(0)
