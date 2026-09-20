@@ -1,11 +1,29 @@
 """Integration tests for Scans, Overrides, Reports, PDF export, Email, and Dashboard API."""
 
+import asyncio
+
 import pytest
 import io
 from PIL import Image, ImageDraw
 from httpx import AsyncClient, ASGITransport
 from app.main import app
 from app.services.auth_service import create_access_token
+
+
+async def _wait_for_scan(
+    ac: AsyncClient, scan_id: str, headers: dict, timeout_s: float = 120.0
+) -> dict:
+    """Poll GET /scans/{id} until the background processing reports done/failed."""
+    deadline = asyncio.get_event_loop().time() + timeout_s
+    last: dict = {}
+    while asyncio.get_event_loop().time() < deadline:
+        resp = await ac.get(f"/api/v1/scans/{scan_id}", headers=headers)
+        assert resp.status_code == 200, resp.text
+        last = resp.json()
+        if last["status"] in ("done", "failed"):
+            return last
+        await asyncio.sleep(0.2)
+    raise AssertionError(f"Scan {scan_id} never finished processing; last={last}")
 
 
 async def _login(ac: AsyncClient, identifier: str, password: str) -> dict:
@@ -49,15 +67,17 @@ async def test_full_scan_report_workflow():
         }
 
         scan_resp = await ac.post("/api/v1/scans", files=files, data=data, headers=headers)
-        assert scan_resp.status_code == 201
+        assert scan_resp.status_code == 202
         scan_data = scan_resp.json()
         assert "scan_id" in scan_data
         scan_id = scan_data["scan_id"]
+        # Accepted scan starts queued/processing with no verdict yet.
+        assert scan_data["status"] in ("queued", "processing")
+        assert scan_data["verdict"] is None
 
-        # 2. Get scan details (auth required: scan data is enforcement evidence)
-        detail_resp = await ac.get(f"/api/v1/scans/{scan_id}", headers=headers)
-        assert detail_resp.status_code == 200
-        details = detail_resp.json()
+        # 2. Get scan details once background processing completes
+        details = await _wait_for_scan(ac, scan_id, headers)
+        assert details["status"] == "done"
         assert "verdict" in details
         assert "confidence_pie" in details
         assert len(details["confidence_pie"]) == 3

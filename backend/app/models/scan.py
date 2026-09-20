@@ -55,6 +55,10 @@ class Scan(Base):
     )
     processing_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ocr_engine: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # Set when processing fails asynchronously (blur rejection, OCR engine error).
+    # The UI reads this via the status-poll endpoint to tell the inspector what
+    # went wrong instead of leaving a scan stuck in 'processing' forever.
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     model_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
     geo_lat: Mapped[float | None] = mapped_column(Numeric(10, 7), nullable=True)
     geo_lng: Mapped[float | None] = mapped_column(Numeric(10, 7), nullable=True)

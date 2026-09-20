@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     # OCR
     OCR_CONFIDENCE_THRESHOLD: float = 0.75
     OCR_ENGINE: str = "tesseract"  # "tesseract" or "paddleocr"
+    # Longest side a label image is downscaled to before OCR. The OCR models work
+    # fine at this size; beyond it, inference memory and time explode on small
+    # instances (Render free tier OOM-kills the worker mid-request -> HTTP 502).
+    OCR_MAX_DIMENSION: int = 1200
 
     # CORS – defaults include the deployed frontend so a missing env var can never lock out users
     CORS_ORIGINS: str = (

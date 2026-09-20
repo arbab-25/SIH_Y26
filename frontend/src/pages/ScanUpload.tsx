@@ -238,16 +238,48 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({
       setTimeout(() => setActiveStep(2), 600);
       setTimeout(() => setActiveStep(3), 1200);
 
+      // The backend accepts the upload immediately (202) and processes the OCR
+      // + rule pipeline in the background — on the free deployment tier a
+      // synchronous request was killed mid-flight (502). Poll until the scan
+      // reports done or failed.
       const res = await api.post('/scans', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
 
+      const scanId: string | undefined = res.data?.scan_id || res.data?.id;
+      if (!scanId) {
+        throw new Error('Scan was accepted but no scan id was returned.');
+      }
+
+      const POLL_INTERVAL_MS = 1500;
+      const POLL_TIMEOUT_MS = 180000; // free-tier OCR can take a while on cold start
+      const deadline = Date.now() + POLL_TIMEOUT_MS;
+
+      let finalStatus = '';
+      let details: any = null;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+        const detailRes = await api.get(`/scans/${scanId}`);
+        details = detailRes.data;
+        finalStatus = details?.status || '';
+        if (finalStatus === 'done' || finalStatus === 'failed') break;
+      }
+
       setActiveStep(4); // Done
 
-      const scanId = res.data?.scan_id || res.data?.id;
-      // Fetch full details
-      const detailRes = await api.get(`/scans/${scanId}`);
-      onScanComplete(detailRes.data);
+      if (finalStatus === 'failed') {
+        setErrorMessage(
+          details?.error_message ||
+            'We could not read this label clearly. Please move closer, hold steady, and retake the photo.'
+        );
+        return;
+      }
+      if (finalStatus !== 'done' || !details) {
+        setErrorMessage('The scan is taking longer than expected. Check Scan History in a moment — it will appear there once processing completes.');
+        return;
+      }
+
+      onScanComplete(details);
     } catch (err: any) {
       const detail = err.response?.data?.detail;
       setErrorMessage(detail || 'We could not read this label clearly. Please move closer, hold steady, and retake the photo.');

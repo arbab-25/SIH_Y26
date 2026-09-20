@@ -3,14 +3,16 @@
 import os
 import uuid
 import time
+import asyncio
 from datetime import datetime
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request, status, Query
+from fastapi import BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc, or_
 from sqlalchemy.orm import selectinload
 
-from app.database import get_db
+from app.database import get_db, async_session_factory
 from app.config import settings
 from app.models.user import User
 from app.models.scan import Scan, ScanStatus, Verdict
@@ -29,6 +31,198 @@ from app.utils.rate_limit import check_rate_limit
 router = APIRouter(prefix="/scans", tags=["Scans"])
 
 
+async def _process_scan(
+    scan_id: uuid.UUID,
+    is_imported: bool = False,
+    pdp_height_cm: Optional[float] = None,
+    pdp_width_cm: Optional[float] = None,
+    measured_glyph_height_mm: Optional[float] = None,
+) -> None:
+    """Run OCR + extraction + rule evaluation for a queued scan.
+
+    Executed as a FastAPI background task so the upload request returns
+    immediately (202). On Render's free tier, running RapidOCR inside the
+    request exhausted the 512 MB instance and the proxy answered 502 before
+    the worker finished; moving the heavy work out of the request keeps the
+    connection short-lived while the inspector polls GET /scans/{id} for the
+    outcome.
+
+    Opens its own session (the request's session is closed by then). Every
+    failure path marks the scan FAILED with a user-facing error_message —
+    the scan row can never be left stuck in PROCESSING with no explanation.
+    """
+    async with async_session_factory() as db:
+        try:
+            res = await db.execute(select(Scan).where(Scan.id == scan_id))
+            scan = res.scalar_one_or_none()
+            if scan is None:
+                return
+
+            start_time = time.time()
+            scan.status = ScanStatus.PROCESSING
+            await db.commit()
+
+            all_ocr_items = []
+            combined_metadata = {}
+            is_any_blurry = False
+            blur_error_msg = None
+
+            for img_path in scan.image_urls or []:
+                try:
+                    # run in a worker thread: OCR is CPU-bound and would block
+                    # the event loop, stalling every other request on a 1-CPU
+                    # instance.
+                    items, meta = await asyncio.to_thread(run_ocr, img_path, True)
+                    if meta.get("blurry"):
+                        is_any_blurry = True
+                        blur_error_msg = meta.get("error")
+                    all_ocr_items.extend(items)
+                    combined_metadata = meta
+                except Exception as e:
+                    print(f"[WARN] OCR failed for {img_path}: {e}")
+
+            if is_any_blurry and len(all_ocr_items) < 5:
+                scan.status = ScanStatus.FAILED
+                scan.verdict = Verdict.NEEDS_REVIEW
+                scan.error_message = blur_error_msg or (
+                    "We couldn't read this label clearly. Please move closer, "
+                    "hold steady, and retake the photo."
+                )
+                scan.processing_time_ms = int((time.time() - start_time) * 1000)
+                await db.commit()
+                return
+
+            extracted_data = extract_fields_from_ocr(all_ocr_items)
+            extracted_dict = extracted_data.to_dict()
+
+            evaluation = evaluate_product_compliance(
+                extracted_data=extracted_dict,
+                category=scan.category,
+                package_type=scan.package_type,
+                is_imported=is_imported,
+                pdp_height_cm=pdp_height_cm,
+                pdp_width_cm=pdp_width_cm,
+                measured_glyph_height_mm=measured_glyph_height_mm,
+            )
+
+            ENGINE_FIELD_ALIASES = {
+                "manufacturer_name": "manufacturer",
+                "manufacturer_address": "manufacturer",
+                "pin_code": "manufacturer",
+                "product_name": "product_name",
+                "net_quantity_value": "net_quantity",
+                "net_quantity_unit": "net_quantity",
+                "vague_quantity_found": "net_quantity_qualifiers",
+                "mrp": "mrp",
+                "mrp_inclusive_taxes": "mrp",
+                "mfg_date_str": "mfg_date",
+                "best_before": "best_before",
+                "fssai_number": "fssai_license",
+                "ingredients_declared": "ingredients_list",
+                "nutritional_info_declared": "nutritional_information",
+                "country_of_origin": "country_of_origin",
+            }
+            DISPLAY_ONLY_FIELDS = {"brand", "mrp_detected_text", "barcode_gtin"}
+
+            for key, item in extracted_dict.items():
+                engine_field = ENGINE_FIELD_ALIASES.get(key)
+                matching_res = next((r for r in evaluation.results if r.field == engine_field), None) if engine_field else None
+                conf_pct = float(item.get("confidence", 0) or 0)
+                if conf_pct <= 1.0:
+                    conf_pct *= 100.0
+                if matching_res is not None:
+                    f_status = matching_res.status
+                elif key in DISPLAY_ONLY_FIELDS or conf_pct >= 75:
+                    f_status = Verdict.COMPLIANT
+                else:
+                    f_status = Verdict.NEEDS_REVIEW
+                ef = ExtractedField(
+                    scan_id=scan_id,
+                    field_key=key,
+                    field_value=str(item.get("value", "")),
+                    confidence=float(item.get("confidence", 0.0) or 0) * 100 if float(item.get("confidence", 1.0) or 0) <= 1.0 else float(item.get("confidence", 0.0)),
+                    bbox=item.get("bbox"),
+                    status=f_status
+                )
+                db.add(ef)
+
+            rule_rows = (await db.execute(select(Rule.id, Rule.rule_number))).all()
+            rule_id_by_number = {rule_number: rule_id for rule_id, rule_number in rule_rows}
+
+            for v in evaluation.violations:
+                viol = Violation(
+                    scan_id=scan_id,
+                    field_key=v.field,
+                    rule_ref=v.rule_ref,
+                    rule_id=rule_id_by_number.get(v.rule_ref),
+                    severity=Severity.MAJOR if v.severity == "MAJOR" else Severity.MINOR,
+                    message_en=v.message_en,
+                    message_hi=v.message_hi,
+                    suggested_fix=v.suggested_fix
+                )
+                db.add(viol)
+
+            def _val(extracted: dict, key: str):
+                item = extracted.get(key)
+                if not isinstance(item, dict):
+                    return None
+                return item.get("value")
+
+            nq_value = _val(extracted_dict, "net_quantity_value")
+            mrp_value = _val(extracted_dict, "mrp")
+            product = Product(
+                scan_id=scan_id,
+                product_name=str(_val(extracted_dict, "product_name") or "Pre-packaged Commodity"),
+                brand=str(_val(extracted_dict, "brand") or ""),
+                category=scan.category or "General",
+                manufacturer_name=str(_val(extracted_dict, "manufacturer_name") or ""),
+                manufacturer_address=str(_val(extracted_dict, "manufacturer_address") or ""),
+                pin_code=str(_val(extracted_dict, "pin_code") or ""),
+                country_of_origin=str(_val(extracted_dict, "country_of_origin") or ""),
+                net_quantity_value=float(nq_value) if nq_value is not None else None,
+                net_quantity_unit=str(_val(extracted_dict, "net_quantity_unit") or ""),
+                mrp=float(mrp_value) if mrp_value is not None else None,
+                fssai_number=str(_val(extracted_dict, "fssai_number") or ""),
+                consumer_care_phone=str(_val(extracted_dict, "consumer_care_phone") or ""),
+                consumer_care_email=str(_val(extracted_dict, "consumer_care_email") or ""),
+                barcode_gtin=str(_val(extracted_dict, "barcode_gtin") or "")
+            )
+            db.add(product)
+
+            scan.status = ScanStatus.DONE
+            scan.verdict = evaluation.verdict
+            scan.compliance_score = evaluation.compliance_score
+            if all_ocr_items:
+                word_confidences = [
+                    item.confidence * 100 if item.confidence <= 1.0 else item.confidence
+                    for item in all_ocr_items
+                ]
+                scan.avg_ocr_confidence = round(sum(word_confidences) / len(word_confidences), 2)
+            else:
+                scan.avg_ocr_confidence = 0.0
+            scan.ocr_engine = combined_metadata.get("engine") or settings.OCR_ENGINE
+            scan.processing_time_ms = int((time.time() - start_time) * 1000)
+            await db.commit()
+        except Exception as exc:
+            # Never leave the scan stuck in PROCESSING: record the failure on the
+            # row so the poll endpoint can surface it to the inspector.
+            await db.rollback()
+            try:
+                res = await db.execute(select(Scan).where(Scan.id == scan_id))
+                scan = res.scalar_one_or_none()
+                if scan is not None:
+                    scan.status = ScanStatus.FAILED
+                    scan.verdict = Verdict.NEEDS_REVIEW
+                    scan.error_message = (
+                        "Processing failed on the server. Please retry the scan; "
+                        "if it keeps failing, use a clearer, well-lit photo."
+                    )
+                    await db.commit()
+            except Exception:
+                pass
+            print(f"[ERROR] Background scan processing failed for {scan_id}: {exc}")
+
+
 def _val(extracted: dict, key: str):
     """Read the plain value of an extracted field.
 
@@ -44,9 +238,10 @@ def _val(extracted: dict, key: str):
     return item.get("value")
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post("", status_code=status.HTTP_202_ACCEPTED)
 async def create_scan(
     request: Request,
+    background_tasks: BackgroundTasks,
     images: List[UploadFile] = File(...),
     category: Optional[str] = Form(None),
     package_type: Optional[str] = Form("retail"),
@@ -105,7 +300,12 @@ async def create_scan(
             
         saved_image_paths.append(target_path)
 
-    # 3. Create Scan record (always owned by the signed-in inspector)
+    # 3. Create Scan record (always owned by the signed-in inspector).
+    # The heavy OCR/rule work runs as a background task: on the free deployment
+    # tier the synchronous version exhausted the instance mid-request and the
+    # proxy returned 502 to the inspector. The request only persists the upload
+    # and returns 202 with the scan id; the client polls GET /scans/{id} until
+    # status is done or failed.
     scan_id = uuid.uuid4()
     scan = Scan(
         id=scan_id,
@@ -114,185 +314,30 @@ async def create_scan(
         image_urls=saved_image_paths,
         package_type=package_type,
         category=category,
-        status=ScanStatus.PROCESSING,
+        status=ScanStatus.QUEUED,
         ocr_engine=settings.OCR_ENGINE,
         created_at=datetime.utcnow()
     )
     db.add(scan)
     await db.commit()
 
-    # 4. Process OCR on images
-    all_ocr_items = []
-    combined_metadata = {}
-    is_any_blurry = False
-    blur_error_msg = None
-
-    for img_path in saved_image_paths:
-        try:
-            items, meta = run_ocr(img_path, detect_blur=True)
-            if meta.get("blurry"):
-                is_any_blurry = True
-                blur_error_msg = meta.get("error")
-            all_ocr_items.extend(items)
-            combined_metadata = meta
-        except Exception as e:
-            print(f"[WARN] OCR failed for {img_path}: {e}")
-
-    # Blur / retry handling per §7.1
-    if is_any_blurry and len(all_ocr_items) < 5:
-        scan.status = ScanStatus.FAILED
-        scan.verdict = Verdict.NEEDS_REVIEW
-        scan.processing_time_ms = int((time.time() - start_time) * 1000)
-        await db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=blur_error_msg or "We couldn't read this label clearly. Please move closer, hold steady, and retake the photo."
-        )
-
-    # 5. Extract Declarations
-    extracted_data = extract_fields_from_ocr(all_ocr_items)
-    extracted_dict = extracted_data.to_dict()
-
-    # 6. Evaluate Rules
-    evaluation = evaluate_product_compliance(
-        extracted_data=extracted_dict,
-        category=category,
-        package_type=package_type,
-        is_imported=is_imported,
-        pdp_height_cm=pdp_height_cm,
-        pdp_width_cm=pdp_width_cm,
-        measured_glyph_height_mm=measured_glyph_height_mm
+    background_tasks.add_task(
+        _process_scan,
+        scan_id,
+        is_imported,
+        pdp_height_cm,
+        pdp_width_cm,
+        measured_glyph_height_mm,
     )
-
-    # 7. Persist Extracted Fields
-    # Map extractor field keys -> rule-engine check field names. The engine emits
-    # its own check-level names (e.g. 'manufacturer', 'net_quantity'); without this
-    # mapping almost no extracted field ever received its engine status and every
-    # scan showed constant NEEDS_REVIEW across the board.
-    ENGINE_FIELD_ALIASES = {
-        "manufacturer_name": "manufacturer",
-        "manufacturer_address": "manufacturer",
-        "pin_code": "manufacturer",
-        "product_name": "product_name",
-        "net_quantity_value": "net_quantity",
-        "net_quantity_unit": "net_quantity",
-        "vague_quantity_found": "net_quantity_qualifiers",
-        "mrp": "mrp",
-        "mrp_inclusive_taxes": "mrp",
-        "mfg_date_str": "mfg_date",
-        "best_before": "best_before",
-        "fssai_number": "fssai_license",
-        "ingredients_declared": "ingredients_list",
-        "nutritional_info_declared": "nutritional_information",
-        "country_of_origin": "country_of_origin",
-    }
-    # Fields that are display/context only — they carry no statutory check of
-    # their own, so a clean read is simply COMPLIANT, never NEEDS_REVIEW.
-    DISPLAY_ONLY_FIELDS = {"brand", "mrp_detected_text", "barcode_gtin"}
-
-    for key, item in extracted_dict.items():
-        engine_field = ENGINE_FIELD_ALIASES.get(key)
-        matching_res = next((r for r in evaluation.results if r.field == engine_field), None) if engine_field else None
-        conf_pct = float(item.get("confidence", 0) or 0)
-        if conf_pct <= 1.0:
-            conf_pct *= 100.0
-        if matching_res is not None:
-            # The engine may have checked a sibling field that wasn't extracted
-            # (e.g. the manufacturer check with no name line read) — only adopt
-            # its verdict when the engine actually saw a value, otherwise fall
-            # through to the confidence-based default below.
-            f_status = matching_res.status
-        elif key in DISPLAY_ONLY_FIELDS or conf_pct >= 75:
-            # Clean high-confidence read with no adverse engine finding ->
-            # informational COMPLIANT, never a constant NEEDS_REVIEW flag.
-            f_status = Verdict.COMPLIANT
-        else:
-            f_status = Verdict.NEEDS_REVIEW
-        ef = ExtractedField(
-            scan_id=scan_id,
-            field_key=key,
-            field_value=str(item.get("value", "")),
-            confidence=float(item.get("confidence", 0.0) or 0) * 100 if float(item.get("confidence", 1.0) or 0) <= 1.0 else float(item.get("confidence", 0.0)),
-            bbox=item.get("bbox"),
-            status=f_status
-        )
-        db.add(ef)
-
-    # 8. Persist Violations. Every checker reports the exact rule it applies
-    # (e.g. "rule-6-1-e"); that string is persisted for deep-linking and resolved
-    # to the seeded rules rows so each violation also links to the quoted
-    # statutory text in the Rule Book instead of a synthesised reference.
-    rule_rows = (await db.execute(select(Rule.id, Rule.rule_number))).all()
-    rule_id_by_number = {rule_number: rule_id for rule_id, rule_number in rule_rows}
-
-    for v in evaluation.violations:
-        viol = Violation(
-            scan_id=scan_id,
-            field_key=v.field,
-            rule_ref=v.rule_ref,
-            rule_id=rule_id_by_number.get(v.rule_ref),
-            severity=Severity.MAJOR if v.severity == "MAJOR" else Severity.MINOR,
-            message_en=v.message_en,
-            message_hi=v.message_hi,
-            suggested_fix=v.suggested_fix
-        )
-        db.add(viol)
-
-    # 9. Persist Product summary record (plain values only — see _val()).
-    # The extractor omits a key it could not read, so None means "not detected" and
-    # is stored as NULL. A declared zero would be a defect of its own, so NULL is
-    # kept distinct from 0. Country of origin is only written when actually read:
-    # defaulting to "India" for domestic packages recorded a declaration that may
-    # never appear on the package, which a statutory report must not invent.
-    nq_value = _val(extracted_dict, "net_quantity_value")
-    mrp_value = _val(extracted_dict, "mrp")
-    product = Product(
-        scan_id=scan_id,
-        product_name=str(_val(extracted_dict, "product_name") or "Pre-packaged Commodity"),
-        brand=str(_val(extracted_dict, "brand") or ""),
-        category=category or "General",
-        manufacturer_name=str(_val(extracted_dict, "manufacturer_name") or ""),
-        manufacturer_address=str(_val(extracted_dict, "manufacturer_address") or ""),
-        pin_code=str(_val(extracted_dict, "pin_code") or ""),
-        country_of_origin=str(_val(extracted_dict, "country_of_origin") or ""),
-        net_quantity_value=float(nq_value) if nq_value is not None else None,
-        net_quantity_unit=str(_val(extracted_dict, "net_quantity_unit") or ""),
-        mrp=float(mrp_value) if mrp_value is not None else None,
-        fssai_number=str(_val(extracted_dict, "fssai_number") or ""),
-        consumer_care_phone=str(_val(extracted_dict, "consumer_care_phone") or ""),
-        consumer_care_email=str(_val(extracted_dict, "consumer_care_email") or ""),
-        barcode_gtin=str(_val(extracted_dict, "barcode_gtin") or "")
-    )
-    db.add(product)
-
-    # 10. Update Scan record (record the OCR engine actually used, not just the configured default)
-    scan.status = ScanStatus.DONE
-    scan.verdict = evaluation.verdict
-    scan.compliance_score = evaluation.compliance_score
-    # Average every word read across all panels; the per-image metadata only described
-    # the last panel, so a multi-image scan under-reported or over-reported OCR quality.
-    if all_ocr_items:
-        word_confidences = [
-            item.confidence * 100 if item.confidence <= 1.0 else item.confidence
-            for item in all_ocr_items
-        ]
-        scan.avg_ocr_confidence = round(sum(word_confidences) / len(word_confidences), 2)
-    else:
-        scan.avg_ocr_confidence = 0.0
-    # Record the engine that actually ran, not the configured preference, so every
-    # stored confidence stays traceable to the engine that produced it.
-    scan.ocr_engine = combined_metadata.get("engine") or settings.OCR_ENGINE
-    scan.processing_time_ms = int((time.time() - start_time) * 1000)
-
-    await db.commit()
 
     return {
         "id": str(scan.id),
         "scan_id": str(scan.id),
         "status": scan.status.value,
-        "verdict": scan.verdict.value,
-        "compliance_score": scan.compliance_score,
-        "processing_time_ms": scan.processing_time_ms
+        "verdict": None,
+        "compliance_score": None,
+        "processing_time_ms": None,
+        "message": "Scan accepted; poll GET /api/v1/scans/{scan_id} until status is done or failed."
     }
 
 
@@ -358,6 +403,7 @@ async def get_scan_details(
         "compliance_score": float(scan.compliance_score or 0.0),
         "avg_ocr_confidence": float(scan.avg_ocr_confidence or 0.0),
         "processing_time_ms": scan.processing_time_ms,
+        "error_message": scan.error_message,
         "category": scan.category,
         "package_type": scan.package_type,
         "created_at": scan.created_at.isoformat(),

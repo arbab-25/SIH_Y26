@@ -86,7 +86,10 @@ def _remote_ssl_config(url: str) -> dict:
     pg8000's connect() parameter is 'ssl_context' (an ssl.SSLContext) — it
     does not accept libpq-style 'sslmode'. Mirrors app/database.py: CERT_NONE
     so managed Postgres (Neon/Render) TLS works without certificate files.
+    Non-postgres URLs (SQLite) get no connect args at all.
     """
+    if not url.startswith("postgresql"):
+        return {}
     if "localhost" in url or "127.0.0.1" in url:
         return {}
     import ssl

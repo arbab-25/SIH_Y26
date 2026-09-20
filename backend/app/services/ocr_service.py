@@ -151,6 +151,20 @@ def run_ocr(
     else:
         raise ValueError("Invalid image input type")
 
+    # Downscale oversized photos before OCR. Detection accuracy holds to the
+    # configured longest side, while inference memory and wall-time scale with
+    # pixel count — without this a full-resolution phone photo exhausted the
+    # deployment instance (Render free tier) and the request died with a 502.
+    max_dim = settings.OCR_MAX_DIMENSION
+    h, w = image.shape[:2]
+    if max(h, w) > max_dim:
+        scale = max_dim / float(max(h, w))
+        image = cv2.resize(
+            image,
+            (max(1, int(round(w * scale))), max(1, int(round(h * scale)))),
+            interpolation=cv2.INTER_AREA,
+        )
+
     # Check blur
     is_blurry, blur_score = is_image_blurry(image)
     if detect_blur and is_blurry:
