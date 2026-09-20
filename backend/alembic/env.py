@@ -47,9 +47,10 @@ def run_migrations_offline() -> None:
 def _remote_ssl_config(url: str) -> dict:
     """Return connect_args for a remote Postgres (Neon/Render) TLS connection.
 
-    pg8000 does NOT accept libpq-style 'sslmode' in connect_args — it uses an
-    SSLContext. Mirrors app/database.py (CERT_NONE so self-signed and managed-
-    Postgres TLS both work without cert verification).
+    pg8000's connect() parameter is 'ssl_context' (an ssl.SSLContext) — it does
+    NOT accept libpq-style 'sslmode' or a bare 'ssl' kwarg. Mirrors
+    app/database.py (CERT_NONE so self-signed and managed-Postgres TLS both
+    work without certificate verification).
     """
     if "localhost" in url or "127.0.0.1" in url:
         return {}
@@ -57,7 +58,7 @@ def _remote_ssl_config(url: str) -> dict:
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
-    return {"ssl": ctx}
+    return {"ssl_context": ctx}
 
 
 def run_migrations_online() -> None:

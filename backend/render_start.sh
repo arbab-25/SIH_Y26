@@ -41,20 +41,32 @@ import os, sys, ssl
 try:
     import sqlalchemy
     url = os.environ['DATABASE_URL_SYNC']
+    from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
     # Normalize to a sqlalchemy dialect form it recognises. pg8000 is the sync
     # driver in this project — psycopg2 is deliberately NOT installed (see
     # requirements.txt), so 'postgresql://' (psycopg2) must never be used here.
     if url.startswith('postgresql://') and '+' not in url:
         url = 'postgresql+pg8000://' + url[len('postgresql://'):]
+    # Neon/Render copy-strings append libpq-only query params (sslmode,
+    # channel_binding, gssencmode). SQLAlchemy forwards URL query params to
+    # pg8000's connect() as kwargs, and pg8000 rejects 'sslmode' with
+    # TypeError — so strip them here, exactly as app/config.py does for the
+    # app process (which this shell snippet bypasses by reading the env var
+    # directly).
+    parts = urlsplit(url)
+    if parts.query:
+        kept = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
+                if k.lower() not in ('sslmode', 'channel_binding', 'gssencmode')]
+        url = urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(kept), parts.fragment))
     # pg8000 does NOT accept libpq-style 'sslmode' in connect_args. Use an
-    # SSLContext instead, mirroring app/database.py (CERT_NONE so self-signed
-    # and managed-Postgres TLS both work).
+    # SSLContext instead — pg8000's parameter is 'ssl_context' (CERT_NONE so
+    # self-signed and managed-Postgres TLS both work).
     connect_args = {}
     if 'localhost' not in url and '127.0.0.1' not in url:
         _ctx = ssl.create_default_context()
         _ctx.check_hostname = False
         _ctx.verify_mode = ssl.CERT_NONE
-        connect_args['ssl'] = _ctx
+        connect_args['ssl_context'] = _ctx
     eng = sqlalchemy.create_engine(url, connect_args=connect_args)
     with eng.connect() as c:
         c.exec_driver_sql('SELECT 1')
