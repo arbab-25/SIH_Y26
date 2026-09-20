@@ -257,12 +257,21 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({
 
       let finalStatus = '';
       let details: any = null;
+      let pollCount = 0;
       while (Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+        pollCount += 1;
         const detailRes = await api.get(`/scans/${scanId}`);
         details = detailRes.data;
         finalStatus = details?.status || '';
         if (finalStatus === 'done' || finalStatus === 'failed') break;
+        // Free-tier OCR runs single-threaded and can take ~1-2 minutes.
+        // Reassure the inspector so the wait doesn't read as a hang.
+        if (pollCount === 4) {
+          setErrorMessage(lang === 'hi'
+            ? 'स्कैन अभी भी सर्वर पर प्रोसेस हो रहा है (मुफ़्त स्तर के हार्डवेयर पर OCR में लगभग 1-2 मिनट लग सकते हैं)। कृपया प्रतीक्षा करें।'
+            : 'Still processing on the server — OCR can take 1-2 minutes on our free-tier hardware. Please keep this page open.');
+        }
       }
 
       setActiveStep(4); // Done
