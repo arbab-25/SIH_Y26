@@ -89,33 +89,45 @@ class _TesseractEngine:
 
 
 def get_ocr_engine():
-    """Returns a singleton OCR engine instance cached in memory (never None if any engine installed)."""
+    """Returns a singleton OCR engine instance cached in memory (never None if any engine installed).
+
+    Honors the OCR_ENGINE preference. Order matters for the deployment tier:
+    the previous version always loaded RapidOCR first regardless of the setting,
+    so Render carried hundreds of MB of resident ONNX models it never needed —
+    the direct cause of the 'exceeded its memory limit' restarts. With
+    OCR_ENGINE=tesseract, only the lightweight tesseract subprocess is used
+    (~zero resident memory) and RapidOCR stays available as the runtime fallback.
+    """
     global _OCR_ENGINE, _OCR_ENGINE_NAME
     if _OCR_ENGINE is not None:
         return _OCR_ENGINE
 
     errors = []
+    preferred = (getattr(settings, "OCR_ENGINE", "") or "").strip().lower()
 
-    # 1. Preferred: RapidOCR (PaddleOCR PP-OCRv4 ONNX)
-    try:
-        _OCR_ENGINE = _RapidOCREngine()
-        _OCR_ENGINE_NAME = _OCR_ENGINE.name
-        print(f"[OK] {_OCR_ENGINE_NAME} loaded into memory.")
-        return _OCR_ENGINE
-    except Exception as e:  # ImportError or model load failure
-        errors.append(f"rapidocr: {e}")
+    tesseract_factory = lambda: _TesseractEngine()  # noqa: E731
+    rapidocr_factory = lambda: _RapidOCREngine()  # noqa: E731
 
-    # 2. Fallback: Tesseract binary via pytesseract
-    try:
-        engine = _TesseractEngine()
-        # Probe: raises pytesseract.TesseractNotFoundError if binary missing
-        engine(np.zeros((40, 120), dtype=np.uint8))
-        _OCR_ENGINE = engine
-        _OCR_ENGINE_NAME = engine.name
-        print(f"[OK] {_OCR_ENGINE_NAME} loaded into memory (rapidocr unavailable).")
-        return _OCR_ENGINE
-    except Exception as e:
-        errors.append(f"tesseract: {e}")
+    # Attempt order: preferred engine first, then the other as fallback.
+    if preferred == "rapidocr":
+        attempts = [rapidocr_factory, tesseract_factory]
+    else:
+        # Default (and explicit 'tesseract'): tesseract first. The Docker image
+        # ships the binary, and a subprocess engine costs no resident RAM.
+        attempts = [tesseract_factory, rapidocr_factory]
+
+    for factory in attempts:
+        try:
+            engine = factory()
+            if isinstance(engine, _TesseractEngine):
+                # Probe: raises pytesseract.TesseractNotFoundError if binary missing
+                engine(np.zeros((40, 120), dtype=np.uint8))
+            _OCR_ENGINE = engine
+            _OCR_ENGINE_NAME = engine.name
+            print(f"[OK] {_OCR_ENGINE_NAME} loaded as the OCR engine (preferred: {preferred or 'tesseract'}).")
+            return _OCR_ENGINE
+        except Exception as e:  # ImportError, model load failure, missing binary
+            errors.append(f"{getattr(factory, '__name__', 'engine')}: {e}")
 
     print(f"[ERROR] No OCR engine available. Tried -> {'; '.join(errors)}")
     _OCR_ENGINE_NAME = None

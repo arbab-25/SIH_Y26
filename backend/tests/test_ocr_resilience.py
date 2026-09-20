@@ -54,6 +54,48 @@ def test_rapidocr_engine_is_constructed_with_configured_threads(monkeypatch):
     assert captured["threads"] == 2
 
 
+# ------------------------------------------------------------engine preference
+def test_engine_preference_tesseract_is_honored(monkeypatch):
+    """OCR_ENGINE=tesseract must not load the ~300MB resident ONNX models.
+
+    Render's memory-limit restarts were caused by get_ocr_engine() always
+    loading RapidOCR first, ignoring the configured preference.
+    """
+    loaded = []
+
+    class FakeRapid:
+        name = "rapidocr"
+
+        def __init__(self):
+            loaded.append("rapidocr")
+
+    class FakeTess:
+        name = "tesseract"
+
+        def __init__(self):
+            loaded.append("tesseract")
+
+        def __call__(self, image):
+            return []
+
+    import types, sys
+    fake_mod = types.ModuleType("rapidocr_onnxruntime")
+    fake_mod.RapidOCR = FakeRapid
+    monkeypatch.setitem(sys.modules, "rapidocr_onnxruntime", fake_mod)
+
+    monkeypatch.setattr(ocr_service, "_RapidOCREngine", FakeRapid)
+    monkeypatch.setattr(ocr_service, "_TesseractEngine", FakeTess)
+    monkeypatch.setattr(ocr_service.settings, "OCR_ENGINE", "tesseract")
+
+    # Reset the cached engine so the preference is re-evaluated.
+    monkeypatch.setattr(ocr_service, "_OCR_ENGINE", None)
+    monkeypatch.setattr(ocr_service, "_OCR_ENGINE_NAME", None)
+
+    engine = ocr_service.get_ocr_engine()
+    assert engine.name == "tesseract"
+    assert loaded == ["tesseract"], f"expected tesseract only, loaded: {loaded}"
+
+
 # -------------------------------------------------------inference-time fallback
 class _ExplodingEngine:
     name = "rapidocr"
