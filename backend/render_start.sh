@@ -37,7 +37,7 @@ DB_LAST_ERROR=""
 set +e
 for i in $(seq 1 30); do
   DB_LAST_ERROR=$(python -c "
-import os, sys
+import os, sys, ssl
 try:
     import sqlalchemy
     url = os.environ['DATABASE_URL_SYNC']
@@ -46,9 +46,15 @@ try:
     # requirements.txt), so 'postgresql://' (psycopg2) must never be used here.
     if url.startswith('postgresql://') and '+' not in url:
         url = 'postgresql+pg8000://' + url[len('postgresql://'):]
+    # pg8000 does NOT accept libpq-style 'sslmode' in connect_args. Use an
+    # SSLContext instead, mirroring app/database.py (CERT_NONE so self-signed
+    # and managed-Postgres TLS both work).
     connect_args = {}
     if 'localhost' not in url and '127.0.0.1' not in url:
-        connect_args['sslmode'] = 'require'
+        _ctx = ssl.create_default_context()
+        _ctx.check_hostname = False
+        _ctx.verify_mode = ssl.CERT_NONE
+        connect_args['ssl'] = _ctx
     eng = sqlalchemy.create_engine(url, connect_args=connect_args)
     with eng.connect() as c:
         c.exec_driver_sql('SELECT 1')
