@@ -15,7 +15,56 @@ import re
 from typing import Dict, Any, List, Optional
 from rapidfuzz import fuzz, process
 
-from app.utils.regulatory_parsing import is_known_country
+from app.utils.regulatory_parsing import is_known_country, parse_relative_period
+
+# OCR engines emit fullwidth punctuation on Indian labels ("Exp.Date\uFF1A01-01-2027"),
+# which silently breaks every ASCII-keyed regex. Normalized once, on ingestion.
+_FULLWIDTH_MAP = str.maketrans({"\uFF1A": ":", "\uFF0E": ".", "\uFF0C": ",", "\u3000": " "})
+
+# Date-shaped tokens, most specific first: DD-MM-YYYY before MM-YY so a full
+# calendar date is never truncated to its prefix (truncating '02-01-2026' to
+# '02-01' once displayed the manufacture date as 'Feb 2001'). Dot separators
+# are excluded from numeric forms — '2.39' is a nutrition-table decimal, not
+# a printed date.
+_DATE_TOKEN_RE = re.compile(
+    r"(?:\d{1,2}[/\-]\d{1,2}[/\-]\d{4}"
+    r"|(?:0?[1-9]|1[0-2])[/\-](?:20)?\d{2}\b"
+    r"|\b(?:20)?\d{2}[/\-](?:0?[1-9]|1[0-2])\b"
+    r"|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[/\-. ]\s*(?:20)?\d{2,4})",
+    re.IGNORECASE,
+)
+
+_BEST_BEFORE_KEYWORD_RE = re.compile(
+    r"\b(best\s*before|use\s*by|exp(?:iry)?\.?|bb)\b", re.IGNORECASE
+)
+
+
+def _plausible_date_token(raw: str) -> bool:
+    """True when a date-shaped token is trustworthy WITHOUT a keyword anchor.
+
+    A bare two-digit/two-digit token ('02-01') is too ambiguous to store on
+    its own — it could be day-month, month-year or YY-MM — so the fallback
+    pass only accepts tokens containing a 4-digit year or a month name.
+    """
+    parts = re.split(r"[/\-.]", raw)
+    if any(p.isdigit() and len(p) == 4 for p in parts):
+        return True
+    return bool(re.search(r"[A-Za-z]", raw))
+
+
+def _plausible_bb_value(value: str) -> bool:
+    """True when a Best-Before capture is a date or a declared shelf life.
+
+    Guards against storing raw OCR prose: when 'Exp.' matched with nothing
+    date-like after it, the old unanchored capture stored sentence text merged
+    from an adjacent photo ('Date Basundi Mix maiemoe eicosuse ful oeam mi…')
+    and displayed it as the expiry date.
+    """
+    if not value:
+        return False
+    if _DATE_TOKEN_RE.search(value):
+        return True
+    return parse_relative_period(value) is not None
 
 # Declaration keywords that end an address block. Without this, the lines printed
 # after the address (e-mail, customer care, licence number) were swallowed into the
@@ -145,12 +194,85 @@ def full_multiline_source(lines: List[str]) -> bool:
     return any(len(l.split()) >= 3 for l in lines)
 
 
+# Fields that belong to one declaration and must be merged atomically: taking
+# the value from one photo and the unit from another could pair '500' with
+# 'ml' from a different panel.
+_FIELD_GROUPS = (
+    frozenset({"net_quantity_value", "net_quantity_unit"}),
+    frozenset({"mrp", "mrp_inclusive_taxes", "mrp_detected_text"}),
+)
+
+_BOOLEAN_FIELDS = frozenset({"ingredients_declared", "nutritional_info_declared"})
+
+
+def merge_extracted_fields(per_image: List["ExtractedData"]) -> ExtractedData:
+    """Merge per-photo extractions into one result.
+
+    Each photo was extracted independently: OCR items from different photos
+    share one coordinate space, so merging their raw items first made line
+    rebuilding interleave text across panels (a best-before value once picked
+    up prose merged from the neighbouring photo). Merge rules, deterministic:
+
+    - grouped fields (net-quantity pair, MRP trio) come from one photo;
+    - boolean flags are True when any photo saw them;
+    - every other field comes from the photo that read it most confidently,
+      ties going to the earlier photo. Empty strings never win.
+    """
+    merged = ExtractedData()
+    if not per_image:
+        return merged
+
+    dicts = [ext.to_dict() for ext in per_image]
+
+    def _has_content(entry: Dict[str, Any]) -> bool:
+        value = entry.get("value")
+        return value is not None and value != ""
+
+    claimed: set[str] = set()
+    for group in _FIELD_GROUPS:
+        best_i, best_score = None, -1.0
+        for i, d in enumerate(dicts):
+            present = [k for k in group if k in d and _has_content(d[k])]
+            if not present:
+                continue
+            score = sum(float(d[k].get("confidence", 0.0) or 0.0) for k in present)
+            if score > best_score:
+                best_i, best_score = i, score
+        if best_i is not None:
+            for k in group:
+                if k in dicts[best_i] and _has_content(dicts[best_i][k]):
+                    merged.fields[k] = dicts[best_i][k]
+                    claimed.add(k)
+
+    for key in sorted({k for d in dicts for k in d}):
+        if key in claimed:
+            continue
+        best_entry, best_i = None, None
+        for i, d in enumerate(dicts):
+            entry = d.get(key)
+            if not entry or not _has_content(entry):
+                continue
+            if key in _BOOLEAN_FIELDS and entry.get("value") is not True:
+                continue
+            conf = float(entry.get("confidence", 0.0) or 0.0)
+            if best_entry is None or conf > float(best_entry.get("confidence", 0.0) or 0.0):
+                best_entry, best_i = entry, i
+        if best_entry is not None:
+            merged.fields[key] = best_entry
+    return merged
+
+
 def extract_fields_from_ocr(items: List[Any], full_text: Optional[str] = None) -> ExtractedData:
     """Extract structured product declarations from OCR items."""
     data = ExtractedData()
 
     if not items:
         return data
+
+    # Normalize fullwidth punctuation in place before any regex runs.
+    for it in items:
+        if it.text and any(ch in it.text for ch in "\uFF1A\uFF0E\uFF0C\u3000"):
+            it.text = it.text.translate(_FULLWIDTH_MAP)
 
     # Rebuild visual lines first — every downstream regex depends on sane lines.
     raw_lines = [item.text for item in items]
@@ -430,66 +552,101 @@ def extract_fields_from_ocr(items: List[Any], full_text: Optional[str] = None) -
     # ----------------------------------------------------
     # 6. Date of Manufacture / Packing / Import (Rule 6(1)(d))
     # ----------------------------------------------------
-    # Pass 1 (keyword-anchored): a date line explicitly labelled mfd/mfg/pkd/
-    # manufactured/imported — prevents picking the Best-Before date or barcode
-    # digits on multi-date labels like 'MFG 05/2026 BB 05/2027'.
-    date_match = None
-    for line in text_lines:
-        line_match = re.search(
-            r"\b(?:mfd|mfg|mkd|pkd|packed|packaged|manufactured|manf|imported)\b[^0-9a-z]{0,12}"
-            r"((?:0?[1-9]|1[0-2])[/\-.](?:20)?\d{2}|"
-            r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[/\-. \\] \s*(?:20)?\d{2,4}|"
-            r"(?:20)?\d{2}[/\-.](?:0?[1-9]|1[0-2]))",
-            line,
-            re.IGNORECASE,
-        )
-        if line_match:
-            date_match = line_match
+    # Three layouts occur on real panels (all seen on one food box):
+    #   a) same line:      "MFG 05/2026"
+    #   b) stacked:        "Mfg. Date" on one line, ":02-01-2026" on the next
+    #   c) keyword-only:   a bare date elsewhere on the label (least trusted)
+    # Full DD-MM-YYYY dates are kept whole — truncating '02-01-2026' to the
+    # MM-YY prefix '02-01' once displayed the manufacture date as 'Feb 2001'.
+    # Dot-separated numbers are never dates ('2.39' is a nutrition decimal).
+    raw_date = None
+    date_item = None
+    for idx, line in enumerate(text_lines):
+        if not re.search(r"\b(?:mfd|mfg|mkd|pkd|packed|packaged|manufactured|manf|imported)\b", line, re.IGNORECASE):
+            continue
+        m = _DATE_TOKEN_RE.search(line)
+        if m:
+            raw_date = m.group(0)
+            date_item = next((it for it in items if raw_date in (it.text or "")), None)
             break
+        # Stacked layout: the value sits on the next line (often after a
+        # fullwidth colon the normalizer already converted).
+        if idx + 1 < len(text_lines):
+            next_line = text_lines[idx + 1]
+            stripped = next_line.strip(" :.-")
+            m = _DATE_TOKEN_RE.search(stripped)
+            if m and m.group(0) == stripped:
+                raw_date = m.group(0)
+                date_item = next((it for it in items if raw_date in (it.text or "")), None)
+                break
 
-    # Pass 2 (fallback): any plausible month/year token anywhere on the label
-    # (kept for bare panels where the keyword was OCR-mangled).
-    if not date_match:
-        date_match = re.search(
-            r"\b((?:0?[1-9]|1[0-2])[/\-.](?:20)?\d{2}\b|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s/\.-]+(?:20)?\d{2}\b)",
-            combined_text,
-            re.IGNORECASE,
-        )
+    if raw_date is None:
+        # Bare-date fallback: only unambiguous tokens qualify (4-digit year or
+        # month name). '02-01' alone is ambiguous (day-month? month-year?) and
+        # must not be stored as a manufacture date.
+        for line in text_lines:
+            if _BEST_BEFORE_KEYWORD_RE.search(line):
+                continue  # belongs to the best-before declaration, not manufacture
+            for m in _DATE_TOKEN_RE.finditer(line):
+                if _plausible_date_token(m.group(0)):
+                    raw_date = m.group(0)
+                    date_item = next((it for it in items if raw_date in (it.text or "")), None)
+                    break
+            if raw_date:
+                break
 
-    if date_match:
-        raw_date = date_match.group(1)
-        item_date = next((it for it in items if raw_date in it.text), items[0])
-        data.set_field("mfg_date_str", raw_date, item_date.confidence, item_date.bbox, item_date.text)
+    if raw_date:
+        if date_item is None:
+            date_item = items[0]
+        data.set_field("mfg_date_str", raw_date, date_item.confidence, date_item.bbox, date_item.text)
 
-    # Best before / use by date (Rule 6(1)(da))
-    # Terminators: line end or the start of the next declaration, so merged
-    # single-line OCR text never leaks neighbouring declarations into the value.
-    bb_regex = re.compile(
-        r"(?:best\s*before|use\s*by|expiry|exp\.?)\s*[:\-.]?\s*"
-        r"(.+?)(?=\n|$|,|;|\bb(?:est)?\s*before\b|\buse\s*by\b|\bmfd\b|\bmfg\b|\bmrp\b|\bnet\b|\bbatch\b|\blot\b|\bmarketed\b|\bmanufactured\b|\bfssai\b)",
-        re.IGNORECASE
+    # Best before / use by date (Rule 6(1)(da)).
+    # Real panels print this declaration in three layouts (all observed on one
+    # food box):
+    #   a) keyword first: "Best Before: 01-01-2027" / "Exp.Date :01-01-2027"
+    #   b) value first:   ":01-01-2027 Exp.Date"  (date printed left of keyword)
+    #   c) stacked:       keyword alone, value on the next line
+    # The previous single forward regex only knew (a): on layout (b) nothing
+    # followed the keyword, so the expiry date was silently dropped. Its
+    # unanchored capture also stored prose merged from a neighbouring photo as
+    # the expiry date. Line-based matching with a plausibility gate fixes both:
+    # a stored value must look like a date or a declared shelf life, never prose.
+    bb_kw_re = re.compile(
+        r"\b(?:best\s*before|use\s*by|exp(?:iry)?\.?\s*date|exp(?:iry)?\.?|bb)\s*[:\-.]?\s*",
+        re.IGNORECASE,
     )
-    bb_match = bb_regex.search(combined_text)
-    if bb_match:
-        # Stop at line/segment boundaries and strip page-junk so we never store
-        # values like "6 monthsfrom packaging\nMa" from adjacent OCR lines.
-        bb_text = bb_match.group(1).strip().split("\n")[0].strip(" \t.,;:-")
-        # Walk forward in the combined text to grab the remainder of this line
-        # (e.g. "6 months from packaging") that the bounded regex may cut off.
-        tail_start = bb_match.end(1)
-        next_nl = combined_text.find("\n", tail_start)
-        if next_nl == -1:
-            next_nl = len(combined_text)
-        extra = combined_text[tail_start:next_nl].strip()
-        if extra and re.match(r"^[a-zA-Z0-9 ,./-]+$", extra) and len(extra) <= 30:
-            bb_text = (bb_text + " " + extra).strip()
-        # Prefer a matching OCR item on the SAME line as the matched text
-        bb_first_word = bb_text.split()[0] if bb_text.split() else ""
+    for idx, line in enumerate(text_lines):
+        kw = bb_kw_re.search(line)
+        if not kw:
+            continue
+        # (a) keyword first: the value follows on the same line.
+        value = line[kw.end():].strip(" :.,;-")
+        if not _plausible_bb_value(value):
+            # (b) value first: the date is printed BEFORE the keyword
+            # (':01-01-2027 Exp.Date'). Only a clean date or shelf-life token
+            # qualifies — nothing else from the line may leak into the value.
+            before = line[:kw.start()].strip(" :.,;-")
+            m = _DATE_TOKEN_RE.search(before)
+            if m and m.group(0) == before:
+                value = m.group(0)
+            elif parse_relative_period(before) and re.fullmatch(r"\d{1,4}\s*[a-zA-Z]+", before):
+                value = before
+        if not _plausible_bb_value(value) and idx + 1 < len(text_lines):
+            # (c) stacked: the keyword stands alone and the value is printed
+            # on the following line.
+            nxt = text_lines[idx + 1].strip(" :.,;-")
+            if _plausible_bb_value(nxt):
+                value = nxt
+        if not _plausible_bb_value(value):
+            continue  # prose or garbage — not a declaration; leave missing so
+                      # the checker routes it to NEEDS_REVIEW
+        bb_first_word = value.split()[0]
         item_bb = next(
-            (it for it in items if bb_first_word and bb_first_word.lower() in it.text.lower()),
-            items[0]
+            (it for it in items if bb_first_word.lower() in (it.text or "").lower()),
+            items[0],
         )
-        data.set_field("best_before", bb_text, item_bb.confidence, item_bb.bbox, item_bb.text)
+        data.set_field("best_before", value, item_bb.confidence, item_bb.bbox, item_bb.text)
+        break
 
     # ----------------------------------------------------
     # 7. Country of Origin (Rule 6(1)(aa))

@@ -309,7 +309,11 @@ def check_mfg_date_declaration(
 
     # A declaration that was read but cannot be interpreted, or that names a month
     # that has not happened yet, must never pass as compliant (fail closed).
-    if date_str:
+    # A LOW-CONFIDENCE read is not positive evidence either: Tesseract routinely
+    # turns a nutrition-table decimal into a date-shaped string, and acting on
+    # that garbage produced future-date NON_COMPLIANT violations. Below the
+    # threshold the read routes to manual review instead.
+    if date_str and confidence >= settings.OCR_CONFIDENCE_THRESHOLD:
         parsed_date = parse_month_year(date_str)
         if parsed_date is None:
             return CheckResult(
@@ -354,7 +358,7 @@ def check_mfg_date_declaration(
 
     if is_food:
         # Food articles defer date checks to FSS Act per Rule 6(1)(d) Explanation III
-        if date_str:
+        if date_str and confidence >= settings.OCR_CONFIDENCE_THRESHOLD:
             return CheckResult(
                 field="mfg_date",
                 status=Verdict.COMPLIANT,

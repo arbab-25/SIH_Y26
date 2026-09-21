@@ -23,7 +23,7 @@ from app.models.violation import Violation, Severity
 from app.models.field_override import FieldOverride
 from app.api.deps import get_current_user
 from app.services.ocr_service import run_ocr
-from app.services.field_extractors import extract_fields_from_ocr
+from app.services.field_extractors import extract_fields_from_ocr, merge_extracted_fields
 from app.services.rule_engine import evaluate_product_compliance
 from app.utils.image_utils import validate_magic_bytes, strip_exif_keep_orientation
 from app.utils.rate_limit import check_rate_limit
@@ -66,6 +66,7 @@ async def _process_scan(
             combined_metadata = {}
             is_any_blurry = False
             blur_error_msg = None
+            per_image_extractions = []
 
             for img_path in scan.image_urls or []:
                 try:
@@ -88,6 +89,12 @@ async def _process_scan(
                         return
                     all_ocr_items.extend(items)
                     combined_metadata = meta
+                    # Extract per photo: items from different photos share one
+                    # coordinate space, and merging them before line rebuilding
+                    # interleaved text across panels — a best-before value once
+                    # picked up prose merged from the neighbouring photo.
+                    if items:
+                        per_image_extractions.append(extract_fields_from_ocr(items))
                 except Exception as e:
                     print(f"[WARN] OCR failed for {img_path}: {e}")
 
@@ -102,7 +109,7 @@ async def _process_scan(
                 await db.commit()
                 return
 
-            extracted_data = extract_fields_from_ocr(all_ocr_items)
+            extracted_data = merge_extracted_fields(per_image_extractions)
             extracted_dict = extracted_data.to_dict()
 
             evaluation = evaluate_product_compliance(
@@ -149,7 +156,7 @@ async def _process_scan(
                 ef = ExtractedField(
                     scan_id=scan_id,
                     field_key=key,
-                    field_value=str(item.get("value", "")),
+                    field_value=str(v) if (v := item.get("value")) is not None else "",
                     confidence=float(item.get("confidence", 0.0) or 0) * 100 if float(item.get("confidence", 1.0) or 0) <= 1.0 else float(item.get("confidence", 0.0)),
                     bbox=item.get("bbox"),
                     status=f_status

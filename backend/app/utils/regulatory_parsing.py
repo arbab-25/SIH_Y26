@@ -40,9 +40,17 @@ _MONTH_NAME_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Month-first numeric dates: "05/2026", "5-26", "05.2026" — the format Rule
-# 6(1)(d) prescribes for the month and year of manufacture.
-_NUMERIC_MONTH_YEAR_RE = re.compile(r"\b(\d{1,2})\s*[/\-.]\s*(\d{2,4})\b")
+# Month-first numeric dates: "05/2026", "5-26" — the format Rule 6(1)(d)
+# prescribes for the month and year of manufacture. Dot separators are NOT
+# accepted here: "2.39" is a nutrition-table decimal, and reading the dot as a
+# separator manufactured a "Feb 2039" date out of one.
+_NUMERIC_MONTH_YEAR_RE = re.compile(r"\b(\d{1,2})\s*[/\-]\s*(\d{2,4})\b")
+
+# Full calendar dates as printed on Indian retail packs: "02-01-2026",
+# "02/01/2026" (DD-MM-YYYY). Parsed before the month-year forms so a
+# three-component date is never truncated to its MM-YY prefix — truncating
+# '02-01-2026' to '02-01' reported the manufacture date as 'Feb 2001'.
+_NUMERIC_FULL_DATE_RE = re.compile(r"\b(\d{1,2})\s*[/\-]\s*(\d{1,2})\s*[/\-]\s*(\d{4})\b")
 
 # Year-first numeric dates: "2026-05" as printed on some imported packs.
 _NUMERIC_YEAR_MONTH_RE = re.compile(r"\b(\d{4})\s*[/\-.]\s*(\d{1,2})\b")
@@ -99,14 +107,23 @@ def format_month_year(year_month: Tuple[int, int]) -> str:
 def parse_month_year(value: Optional[str]) -> Optional[Tuple[int, int]]:
     """Return ``(year, month)`` for a label date, or ``None`` when unreadable.
 
-    Accepts the declarations found on Indian retail packs: ``MM/YYYY``,
-    ``MM-YY``, ``Month YYYY`` and the ISO ``YYYY-MM`` form.
+    Accepts the declarations found on Indian retail packs: full calendar dates
+    (``DD-MM-YYYY`` / ``DD/MM/YYYY``), ``MM/YYYY``, ``MM-YY``, ``Month YYYY``
+    and the ISO ``YYYY-MM`` form.
     """
     if value is None:
         return None
     text = str(value).strip()
     if not text:
         return None
+
+    # Full DD-MM-YYYY first: the most specific form, and its MM-YY prefix must
+    # never win ('02-01-2026' is January 2026, not 'Feb 2001').
+    full = _NUMERIC_FULL_DATE_RE.search(text)
+    if full:
+        day, month, year = int(full.group(1)), int(full.group(2)), int(full.group(3))
+        if 1 <= month <= 12 and 1 <= day <= 31:
+            return (year, month)
 
     named = _MONTH_NAME_RE.search(text)
     if named:
