@@ -1,5 +1,6 @@
 """Reports API Router — Generate, View, Download PDF, Bulk Excel, and Email Reports."""
 
+import logging
 import os
 import secrets
 import uuid
@@ -280,11 +281,13 @@ async def download_report_pdf(
             os.makedirs(os.path.dirname(pdf_path), exist_ok=True)
             with open(pdf_path, "wb") as f:
                 f.write(data)
-        except Exception:
-            pass
-
-    if not os.path.exists(pdf_path):
-        # Regenerate if still missing
+        except Exception as exc:
+            # Non-fatal: a stale PDF (or no storage copy) is recoverable by the
+            # regeneration path below — but a silent pass hides storage faults,
+            # so record why the cached copy could not be fetched.
+            logging.getLogger(__name__).warning(
+                "Could not reuse stored PDF for report %s: %s", report.report_number, exc
+            )
         stmt_scan = (
             select(Scan)
             .where(Scan.id == report.scan_id)

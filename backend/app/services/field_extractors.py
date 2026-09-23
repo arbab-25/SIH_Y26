@@ -559,14 +559,14 @@ def extract_fields_from_ocr(items: List[Any], full_text: Optional[str] = None) -
     # Full DD-MM-YYYY dates are kept whole — truncating '02-01-2026' to the
     # MM-YY prefix '02-01' once displayed the manufacture date as 'Feb 2001'.
     # Dot-separated numbers are never dates ('2.39' is a nutrition decimal).
-    raw_date = None
+    raw_date: Optional[str] = None
     date_item = None
     for idx, line in enumerate(text_lines):
         if not re.search(r"\b(?:mfd|mfg|mkd|pkd|packed|packaged|manufactured|manf|imported)\b", line, re.IGNORECASE):
             continue
-        m = _DATE_TOKEN_RE.search(line)
-        if m:
-            raw_date = m.group(0)
+        date_match: Optional[re.Match] = _DATE_TOKEN_RE.search(line)
+        if date_match:
+            raw_date = date_match.group(0)
             date_item = next((it for it in items if raw_date in (it.text or "")), None)
             break
         # Stacked layout: the value sits on the next line (often after a
@@ -574,9 +574,9 @@ def extract_fields_from_ocr(items: List[Any], full_text: Optional[str] = None) -
         if idx + 1 < len(text_lines):
             next_line = text_lines[idx + 1]
             stripped = next_line.strip(" :.-")
-            m = _DATE_TOKEN_RE.search(stripped)
-            if m and m.group(0) == stripped:
-                raw_date = m.group(0)
+            stacked_match: Optional[re.Match] = _DATE_TOKEN_RE.search(stripped)
+            if stacked_match and stacked_match.group(0) == stripped:
+                raw_date = stacked_match.group(0)
                 date_item = next((it for it in items if raw_date in (it.text or "")), None)
                 break
 
@@ -626,9 +626,9 @@ def extract_fields_from_ocr(items: List[Any], full_text: Optional[str] = None) -
             # (':01-01-2027 Exp.Date'). Only a clean date or shelf-life token
             # qualifies — nothing else from the line may leak into the value.
             before = line[:kw.start()].strip(" :.,;-")
-            m = _DATE_TOKEN_RE.search(before)
-            if m and m.group(0) == before:
-                value = m.group(0)
+            m2 = _DATE_TOKEN_RE.search(before)
+            if m2 and m2.group(0) == before:
+                value = m2.group(0)
             elif parse_relative_period(before) and re.fullmatch(r"\d{1,4}\s*[a-zA-Z]+", before):
                 value = before
         if not _plausible_bb_value(value) and idx + 1 < len(text_lines):

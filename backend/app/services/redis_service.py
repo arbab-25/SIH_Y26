@@ -12,7 +12,7 @@ Design notes (Phase 2):
   beyond `redis` (which RQ already requires).
 """
 
-from typing import Optional, Any
+from typing import Optional, Any, Tuple, cast
 import json
 
 from app.config import settings
@@ -80,7 +80,11 @@ def cache_get(key: str) -> Optional[Any]:
 
         client = redis.Redis(connection_pool=_get_pool())
         raw = client.get(CACHE_PREFIX + key)
-        return json.loads(raw) if raw is not None else None
+        if raw is None:
+            return None
+        # redis-py's sync client may hand back bytes; json.loads wants str.
+        text = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else str(raw)
+        return json.loads(cast(str, text))
     except Exception as exc:
         print(f"[WARN] cache_get failed: {type(exc).__name__}")
         return None
@@ -113,9 +117,13 @@ def cache_delete_prefix(prefix: str) -> int:
         deleted = 0
         cursor = 0
         while True:
-            cursor, keys = client.scan(cursor=cursor, match=pattern, count=100)
+            scan_result: Tuple[int, list] = cast(
+                Tuple[int, list], client.scan(cursor=cursor, match=pattern, count=100)
+            )
+            cursor = int(scan_result[0])
+            keys = list(scan_result[1])
             if keys:
-                deleted += client.delete(*keys)
+                deleted += cast(int, client.delete(*keys))
             if cursor == 0:
                 break
         return deleted

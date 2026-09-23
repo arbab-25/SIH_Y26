@@ -112,7 +112,7 @@ async def revoke_family(db: AsyncSession, family_id: uuid.UUID) -> int:
         .where(RefreshToken.family_id == family_id, RefreshToken.revoked_at.is_(None))
         .values(revoked_at=datetime.utcnow(), family_revoked=True)
     )
-    return res.rowcount or 0
+    return int(res.rowcount or 0)  # type: ignore[attr-defined]
 
 
 async def revoke_all_for_user(db: AsyncSession, user_id: uuid.UUID) -> int:
@@ -122,4 +122,4 @@ async def revoke_all_for_user(db: AsyncSession, user_id: uuid.UUID) -> int:
         .where(RefreshToken.user_id == user_id, RefreshToken.revoked_at.is_(None))
         .values(revoked_at=datetime.utcnow())
     )
-    return res.rowcount or 0
+    return int(res.rowcount or 0)  # type: ignore[attr-defined]

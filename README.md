@@ -47,7 +47,9 @@ On boot the backend runs `render_start.sh`: waits for the database, applies Alem
 ## Demo accounts (env-seeded — no hardcoded credentials)
 
 The seed script **refuses to invent passwords**. Set these env vars before
-`python seed/seed_db.py` (or configure them in the Render dashboard):
+`python seed/seed_db.py` — values placed in `backend/.env` are honored too
+(the script loads the same dotenv file as the app; process env wins) — or
+configure them in the Render dashboard:
 
 ```
 DEMO_INSPECTOR_EMAIL=inspector@your-domain.gov.in
@@ -63,8 +65,9 @@ The script prints only the account emails, never the passwords.
 
 ```text
 cd frontend && npm ci && npm run build && npm run lint
-cd ../backend && python -m pytest          # 172 tests, ~11 s
+cd ../backend && python -m pytest          # 192 tests, ~8 s
 cd ../backend && python scripts/benchmark_ocr.py   # OCR field precision/recall
+cd ../backend && pip-audit -r requirements.txt && bandit -q -r app   # 0 known vulnerabilities / 0 findings
 cd ../frontend && npx playwright install chromium && npm run e2e   # needs E2E_TEST_EMAIL/PASSWORD
 ```
 
@@ -86,6 +89,8 @@ Measured in this workspace, not estimated. `assets/test 1.jpeg` is a 1200x1600 J
 
 The 1 vCPU / 2 GB deployment target has not been benchmarked from this workspace, so no figure is claimed for it. The thread cap is what makes the difference and is set in `backend/app/services/ocr_service.py` (`ocr_thread_count`).
 
+Preprocessing was re-profiled after the NL-means stage measured as the single largest latency cost (tens of seconds on large frames): the pipeline is now deskew (Hough search on a 600 px copy) → grayscale bilateral denoise → CLAHE → bounded upscale, at ~10 ms per 1200 px frame. `OCR_ENHANCE=false` reverts to the light legacy pipeline for A/B benchmarking.
+
 ## Evaluation data
 
 - `docs/EVALUATION.md` — published OCR baselines (PaddleOCR PP-OCRv3/v4, Tesseract 5) quoted
@@ -96,7 +101,11 @@ The 1 vCPU / 2 GB deployment target has not been benchmarked from this workspace
 
 ## What a scan decides, and on what basis
 
-Every mandatory declaration in Rule 6(1) of the Legal Metrology (Packaged Commodities) Rules, 2011 is checked by a deterministic regex/rule function — no model decides a verdict. Each extracted field carries the OCR confidence and the crop it came from, and a declaration that could not be read is reported as NEEDS_REVIEW rather than as compliance or a violation. Every violation cites the rule the checker applied, resolved against the seeded rule book (parsed from `RULE_BOOK.pdf`), and links to that rule's quoted text.
+Every mandatory declaration in Rule 6(1) of the Legal Metrology (Packaged Commodities) Rules, 2011 is checked by a deterministic regex/rule function — no model decides a verdict. Each extracted field carries the OCR confidence and the crop it came from, and a declaration that could not be read is reported as NEEDS_REVIEW rather than as compliance or a violation. Every violation cites the rule the checker applied, resolved against the seeded rule book, and links to that rule's quoted text.
+
+The seeded rule book covers **all 33 main rules** (1–34 including 32A; 31 was omitted by amendment) extracted verbatim from `RULE_BOOK.pdf`, plus human-curated sub-rule entries — 55 rows in total. Regenerate with `python seed/parse_rulebook.py` (run from `backend/`); the script fails its own build if any main rule goes missing.
+
+Wholesale packages are evaluated against **Rule 24** (manufacturer/address, commodity identity, total quantity) instead of the retail Rule 6 set. Advisory measurements — label contrast (Rule 9(1)(b)), the machine-decoded barcode, and FSSAI-check availability — are displayed and stored in the scan metadata but never gate a verdict or the compliance score.
 
 ## Security posture
 
@@ -106,6 +115,7 @@ Every mandatory declaration in Rule 6(1) of the Legal Metrology (Packaged Commod
 - Security headers on every API response: CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy.
 - CORS restricted to configured origins; API docs (`/docs`) disabled unless `DEBUG=true`.
 - Input sanitization on auth fields; parameterized SQLAlchemy queries throughout (no raw SQL string interpolation).
+- Security audits run clean: `pip-audit` (0 known vulnerabilities — pins are audit-synced) and `bandit` (0 findings); both plus a blocking `mypy` typecheck gate CI.
 - `.env`, SQLite DBs, and `__pycache__` are git-ignored.
 
 ---
@@ -117,7 +127,7 @@ Label photo ──► Upload API (202) ──► dispatch
                                      ├─ RQ + Redis worker (REDIS_URL set)
                                      └─ in-process background task (fallback)
 OCR: RapidOCR (PP-OCR ONNX) ⇄ Tesseract fallback
-Preprocess: deskew (Hough) → NL-means denoise → CLAHE → bounded upscale
+Preprocess: deskew (Hough, downscaled search) → bilateral denoise → CLAHE → bounded upscale
 Cross-check: pyzbar EAN/QR → confirm / demote / fill-at-review
 Deterministic rule engine (no ML decides verdicts) ──► Postgres + audit trail
 Report: WeasyPrint PDF (mirrored to S3/R2 when STORAGE_BACKEND=s3) + openpyxl Excel
@@ -145,7 +155,7 @@ free tier; the API behaves identically without Redis).
 ### CI/CD
 
 GitHub Actions runs on every push/PR: backend lint (ruff), typecheck (mypy,
-informational), pytest, pip-audit; frontend oxlint, build, npm audit.
+blocking), pytest, pip-audit; frontend oxlint, build, npm audit.
 Dependabot updates pip/npm/actions weekly-monthly. Playwright e2e
 (`npm run e2e`) is repo-available and self-skips without seeded credentials.
 

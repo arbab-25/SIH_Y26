@@ -1,6 +1,7 @@
 """SQLAlchemy async engine and session factory."""
 
 import ssl
+from typing import Any, AsyncGenerator
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
@@ -15,7 +16,7 @@ _ssl_ctx = ssl.create_default_context()
 _ssl_ctx.check_hostname = False
 _ssl_ctx.verify_mode = ssl.CERT_NONE
 
-engine_kwargs = {"echo": settings.DEBUG}
+engine_kwargs: dict[str, Any] = {"echo": settings.DEBUG}
 if not is_sqlite:
     engine_kwargs.update({
         "pool_pre_ping": True,
@@ -44,7 +45,7 @@ class Base(DeclarativeBase):
     pass
 
 
-async def get_db() -> AsyncSession:
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """FastAPI dependency that yields a database session."""
     async with async_session_factory() as session:
         try:

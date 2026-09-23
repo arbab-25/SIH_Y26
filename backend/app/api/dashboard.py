@@ -145,12 +145,15 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
     if buckets:
         for i in range(6, -1, -1):
             day = today_start - timedelta(days=i)
-            bucket = buckets.get(day.strftime("%Y-%m-%d"))
+            # Distinct name from the setdefault-loop `bucket` above: days with
+            # no scans are legitimately absent from `buckets`, so this lookup
+            # is Optional (mypy assignment error, not a runtime bug).
+            day_bucket = buckets.get(day.strftime("%Y-%m-%d"))
             compliance_trend.append({
                 "date": day.strftime("%d %b"),
-                "compliant": bucket["compliant"] if bucket else 0,
-                "non_compliant": bucket["non_compliant"] if bucket else 0,
-                "needs_review": bucket["needs_review"] if bucket else 0,
+                "compliant": day_bucket["compliant"] if day_bucket else 0,
+                "non_compliant": day_bucket["non_compliant"] if day_bucket else 0,
+                "needs_review": day_bucket["needs_review"] if day_bucket else 0,
             })
 
     return {

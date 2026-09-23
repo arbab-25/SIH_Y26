@@ -10,6 +10,7 @@ broken. This module now degrades gracefully to Tesseract.
 """
 
 from typing import List, Dict, Any, Optional, Tuple
+import logging
 import numpy as np
 import cv2
 import os
@@ -292,8 +293,11 @@ def run_ocr(
             if legacy is not None and len(legacy) > 2 * max(1, len(results)):
                 print("[INFO] Enhanced-pipeline read underperformed; using legacy preprocessing output.")
                 results = legacy
-        except Exception:
-            pass
+        except Exception as legacy_exc:
+            # The retry is best-effort by design; the enhanced result stands.
+            logging.getLogger(__name__).warning(
+                "Legacy-preprocessing retry failed (keeping enhanced output): %s", legacy_exc
+            )
 
     if results:
         for entry in results:

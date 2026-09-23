@@ -1,5 +1,6 @@
 """Scans API Router — Label Upload, OCR Extraction, Rule Validation, Overrides."""
 
+import logging
 import os
 import re
 import uuid
@@ -151,6 +152,11 @@ async def _process_scan(
                 if decoded:
                     outcome = apply_barcode_crosscheck(extracted_data, decoded)
                     barcode_meta_out = {"source": "pyzbar", **outcome}
+                    # Bind HERE, inside the branch where `decoded` is a real
+                    # value: a stray assignment outside it only worked by
+                    # accident and would raise UnboundLocalError on scans with
+                    # no decodable symbology.
+                    decoded_gtin = decoded
                     print(f"[INFO] Barcode cross-check: {outcome}")
 
             if barcode_meta_out:
@@ -158,7 +164,6 @@ async def _process_scan(
                     **(scan.scan_meta or {}),
                     "barcode": barcode_meta_out,
                 }
-                decoded_gtin = decoded
             extracted_dict = extracted_data.to_dict()
 
             evaluation = evaluate_product_compliance(
@@ -304,7 +309,11 @@ async def _process_scan(
                     )
                     await db.commit()
             except Exception:
-                pass
+                # Never mask the original failure: the scan-row repair itself
+                # failed (DB unavailable, teardown race). Log for postmortem.
+                logging.getLogger(__name__).exception(
+                    "Could not mark scan %s FAILED after a processing error", scan_id
+                )
             print(f"[ERROR] Background scan processing failed for {scan_id}: {exc}")
 
 
@@ -400,7 +409,9 @@ async def create_scan(
                 detail=f"Invalid file format for {img.filename}. Supported: jpg, png, webp, heic, pdf."
             )
 
-        ext = os.path.splitext(img.filename)[1] or ".jpg"
+        # img.filename is Optional[str]: an absent name must fall back to a
+        # safe extension, not crash splitext on None (mypy: AnyOrLiteralStr).
+        ext = os.path.splitext(img.filename or "")[1] or ".jpg"
         unique_name = f"{uuid.uuid4()}{ext}"
         target_path = os.path.join(upload_dir, unique_name)
         

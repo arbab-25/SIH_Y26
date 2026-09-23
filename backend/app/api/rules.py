@@ -69,7 +69,7 @@ async def list_rules(
             end = min(len(r.full_text), idx + len(q) + 60)
             snippet = r.full_text[start:end].replace("\n", " ")
             r_dict["highlight"] = f"...{snippet}..."
-        res.append(RuleResponse(**r_dict))
+        res.append(RuleResponse.model_validate(r_dict))
 
     return res
 

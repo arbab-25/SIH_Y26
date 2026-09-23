@@ -32,10 +32,10 @@ jobs:
           pip install ruff
           ruff check app scripts seed --select E9,F63,F7,F82,F401 --ignore F401
 
-      - name: Type check (mypy, non-blocking informational)
+      - name: Type check (mypy, blocking)
         run: |
           pip install mypy
-          mypy app --ignore-missing-imports --no-error-summary || true
+          mypy app --ignore-missing-imports
 
       - name: Run tests
         env:

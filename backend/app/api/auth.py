@@ -8,6 +8,11 @@ Hardening per security checklist:
 
 import re
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+
+# RFC 6750 token-type value. A module constant (not a bare kwarg literal):
+# security linters flag `token_type="bearer"` as a possible hardcoded secret
+# because of the 'token' in the keyword name — it is a scheme label, not one.
+BEARER_TOKEN_TYPE = "bearer"  # nosec B105 — RFC 6750 scheme label, not a credential
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import uuid
@@ -79,7 +84,7 @@ async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(
     )
     return AuthResponse(
         user=UserResponse.model_validate(user),
-        token=TokenResponse(access_token=token, refresh_token=refresh_raw, token_type="bearer"),
+        token=TokenResponse(access_token=token, refresh_token=refresh_raw, token_type=BEARER_TOKEN_TYPE),
     )
 
 
@@ -127,7 +132,7 @@ async def register(req: RegisterRequest, request: Request, db: AsyncSession = De
     )
     return AuthResponse(
         user=UserResponse.model_validate(user),
-        token=TokenResponse(access_token=token, refresh_token=refresh_raw, token_type="bearer"),
+        token=TokenResponse(access_token=token, refresh_token=refresh_raw, token_type=BEARER_TOKEN_TYPE),
     )
 
 
@@ -164,7 +169,7 @@ async def refresh(req: RefreshRequest, request: Request, db: AsyncSession = Depe
 
     token = create_access_token(str(user.id), user.role.value if hasattr(user.role, "value") else str(user.role))
     await db.commit()
-    return TokenResponse(access_token=token, refresh_token=new_refresh, token_type="bearer")
+    return TokenResponse(access_token=token, refresh_token=new_refresh, token_type=BEARER_TOKEN_TYPE)
 
 
 @router.post("/logout")

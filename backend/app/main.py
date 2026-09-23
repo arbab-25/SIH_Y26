@@ -60,8 +60,11 @@ async def lifespan(app: FastAPI):
                 )
             )
             await session.commit()
-            if result.rowcount:
-                print(f"[OK] Marked {result.rowcount} interrupted scan(s) as failed at startup.")
+            # CursorResult exposes rowcount for UPDATE statements on all
+            # SQLAlchemy dialects; the async Result stub just doesn't declare it.
+            updated = getattr(result, "rowcount", 0)
+            if updated:
+                print(f"[OK] Marked {updated} interrupted scan(s) as failed at startup.")
     except Exception as exc:
         print(f"[WARN] Startup orphan sweep failed: {exc}")
 
@@ -222,7 +225,7 @@ async def logo():
 if __name__ == "__main__":
     uvicorn.run(
         "app.main:app",
-        host="0.0.0.0",
+        host="0.0.0.0",  # nosec B104 — required for Docker/Render containers; the host is protected by the platform
         port=8000,
         reload=settings.DEBUG,
     )

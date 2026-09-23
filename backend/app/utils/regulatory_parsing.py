@@ -127,17 +127,17 @@ def parse_month_year(value: Optional[str]) -> Optional[Tuple[int, int]]:
 
     named = _MONTH_NAME_RE.search(text)
     if named:
-        month = _month_from_token(named.group(1))
-        year = _expand_year(named.group(2))
-        if month and year:
-            return (year, month)
+        named_month: Optional[int] = _month_from_token(named.group(1))
+        named_year = _expand_year(named.group(2))
+        if named_month is not None and named_year is not None:
+            return (named_year, named_month)
 
     month_first = _NUMERIC_MONTH_YEAR_RE.search(text)
     if month_first:
         month = int(month_first.group(1))
-        year = _expand_year(month_first.group(2))
-        if year and 1 <= month <= 12:
-            return (year, month)
+        year_opt = _expand_year(month_first.group(2))
+        if year_opt is not None and 1 <= month <= 12:
+            return (year_opt, month)
 
     year_first = _NUMERIC_YEAR_MONTH_RE.search(text)
     if year_first:

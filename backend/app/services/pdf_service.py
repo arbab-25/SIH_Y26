@@ -52,8 +52,11 @@ def generate_compliance_pdf(
         try:
             logo_rect = fitz.Rect(525, 12, 575, 62)
             page.insert_image(logo_rect, filename=logo_path)
-        except Exception:
-            pass
+        except Exception as exc:
+            # Branding only: the report ships without the logo rather than
+            # failing generation, but the fault is recorded.
+            import logging
+            logging.getLogger(__name__).warning("Report logo not embedded: %s", exc)
 
     # Meta Info Bar
     rep_num = report_data.get("report_number", f"CMD-{datetime.utcnow().strftime('%Y%m%d')}-001")
