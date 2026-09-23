@@ -30,7 +30,10 @@ def upgrade() -> None:
         sa.Column('revoked_at', sa.DateTime(), nullable=True),
         sa.Column('replaced_by_id', sa.Uuid(), nullable=True),
         sa.Column('user_agent', sa.String(length=255), nullable=True),
-        sa.Column('family_revoked', sa.Boolean(), nullable=False, server_default=sa.text('0')),
+        # sa.false() renders as FALSE on Postgres and 0 on SQLite — a literal
+        # '0' fails on Postgres with: column is of type boolean but default
+        # expression is of type integer.
+        sa.Column('family_revoked', sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.PrimaryKeyConstraint('id'),
         sa.ForeignKeyConstraint(['user_id'], ['users.id']),
     )
@@ -45,7 +48,7 @@ def upgrade() -> None:
         sa.Column('description', sa.Text(), nullable=True),
         sa.Column('source_document', sa.String(length=255), nullable=True),
         sa.Column('activated_at', sa.DateTime(), nullable=True),
-        sa.Column('is_active', sa.Boolean(), nullable=False, server_default=sa.text('0')),
+        sa.Column('is_active', sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column('created_at', sa.DateTime(), nullable=False),
         sa.PrimaryKeyConstraint('id'),
     )
