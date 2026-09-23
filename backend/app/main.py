@@ -14,6 +14,11 @@ import uvicorn
 
 from app.config import settings
 from app.api import auth, health, rules, scans, reports, dashboard
+from app.services.sentry_service import init_sentry
+
+# Sentry (Phase 5): a no-op unless SENTRY_DSN is set in the environment.
+# Must run before the app object is created so early exceptions are captured.
+init_sentry()
 
 
 @asynccontextmanager

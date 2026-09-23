@@ -26,6 +26,7 @@ aiofiles==24.1.0
 redis==5.2.1
 rq==2.1
 boto3==1.35.90
+sentry-sdk[fastapi]==2.19.2
 pytest==8.3.4
 pytest-asyncio==0.25.0
 # psycopg2-binary removed for local SQLite dev; use pg8000 for sync PostgreSQL

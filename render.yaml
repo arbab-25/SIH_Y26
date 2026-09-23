@@ -1,6 +1,10 @@
 # render.yaml — CODE MAZE monorepo deployment config
 # Render reads this file automatically when you connect the GitHub repo.
 # Docs: https://render.com/docs/yaml-spec
+#
+# Free-tier cold starts: schedule an UptimeRobot (free, 50 monitors) HTTP
+# ping on codemaze-api-m6f0.onrender.com/api/v1/health every 5–10 minutes.
+# That keeps the API instance warm so inspectors never eat a 50 s spin-up.
 
 services:
   # ── Backend: FastAPI API (Docker) ─────────────────────────────────────────
@@ -26,6 +30,46 @@ services:
         value: tesseract
       - key: OCR_CONFIDENCE_THRESHOLD
         value: "0.75"
+      - key: OCR_ENHANCE
+        value: "true"
+      # ── Redis / RQ (optional) ──
+      # Point at a Valkey/Upstash/Render-Redis free instance. Leave empty to
+      # run scans in-process (current default). When set, also deploy the
+      # codemaze-worker service below so queued jobs are actually consumed.
+      - key: REDIS_URL
+        sync: false
+      # ── Demo accounts (seeded by render_start.sh) ──
+      # NO insecure defaults: set real values in the Render dashboard.
+      - key: DEMO_INSPECTOR_EMAIL
+        sync: false
+      - key: DEMO_INSPECTOR_PASSWORD
+        sync: false
+      - key: DEMO_ADMIN_EMAIL
+        sync: false
+      - key: DEMO_ADMIN_PASSWORD
+        sync: false
+      # ── Rule book version stamped on scans ──
+      - key: RULE_VERSION_CODE
+        value: LMPC-2011-GSR629E-2018
+      # ── Object storage (optional): Cloudflare R2 / any S3-compatible API ──
+      # Set STORAGE_BACKEND=s3 plus the four S3_* values to persist report
+      # PDFs across deploys (Render free-tier disks are ephemeral).
+      - key: S3_ENDPOINT_URL
+        sync: false
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
+      - key: S3_REGION
+        value: auto
+      # ── Error tracking (optional): sentry.io free developer tier ──
+      - key: SENTRY_DSN
+        sync: false
+      - key: ENVIRONMENT
+        value: production
+      # ── Email (existing) ──
       - key: REPORT_RECIPIENT_EMAIL
         value: arbab.momin.2008@gmail.com
       - key: SMTP_HOST
@@ -43,6 +87,35 @@ services:
       - key: SECURE_COOKIES
         value: "true"
 
+  # ── RQ Worker: consumes scan jobs when REDIS_URL is configured ───────────
+  # Free-plan Render runs one web service per account on the free tier; add
+  # this worker when you enable Redis. It is a separate Docker service with
+  # the same image — set REDIS_URL to the same value as the API.
+  - name: codemaze-worker
+    type: worker
+    runtime: docker
+    rootDir: ./backend
+    dockerfilePath: ./Dockerfile
+    plan: starter   # workers are not available on the free plan; see CHANGELOG
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_URL_SYNC
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: STORAGE_BACKEND
+        value: local
+      - key: OCR_ENGINE
+        value: tesseract
+      - key: OCR_ENHANCE
+        value: "true"
+      - key: SENTRY_DSN
+        sync: false
+      - key: ENVIRONMENT
+        value: production
 
   # ── Frontend: React/Vite Static Site ──────────────────────────────────────
   - name: codemaze-frontend
@@ -55,6 +128,12 @@ services:
       - type: rewrite
         source: /*
         destination: /index.html   # SPA fallback — all routes served by index.html
+    headers:
+      # PWA service worker must never be HTTP-cached: it uses its own
+      # update-check cycle (autoUpdate). Manifest + icons can cache briefly.
+      - path: /sw.js
+        name: Cache-Control
+        value: no-cache
     envVars:
       - key: VITE_API_BASE_URL
         value: https://codemaze-api-m6f0.onrender.com/api/v1

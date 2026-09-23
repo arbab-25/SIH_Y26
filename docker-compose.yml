@@ -19,6 +19,18 @@ services:
       timeout: 5s
       retries: 5
 
+  # ── Redis (Valkey, open source) — RQ queue + rule cache ──
+  redis:
+    image: valkey/valkey:8-alpine
+    container_name: codemaze-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   # ── FastAPI Backend ──────────────────────────────
   api:
     build:
@@ -31,21 +43,54 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://codemaze:codemaze@db:5432/codemaze
       DATABASE_URL_SYNC: postgresql+pg8000://codemaze:codemaze@db:5432/codemaze
+      REDIS_URL: redis://redis:6379/0
       JWT_SECRET: dev-secret-change-in-production
       CORS_ORIGINS: http://localhost:5173,http://localhost:3000
       STORAGE_BACKEND: local
       OCR_ENGINE: tesseract
       OCR_CONFIDENCE_THRESHOLD: "0.75"
+      # Demo credentials for local compose only — override in any shared env.
+      DEMO_INSPECTOR_EMAIL: inspector@demo.gov.in
+      DEMO_INSPECTOR_PASSWORD: Demo@1234
+      DEMO_ADMIN_EMAIL: admin@codemaze.app
+      DEMO_ADMIN_PASSWORD: Admin@1234
+      SENTRY_DSN: ""
     volumes:
       - ./backend:/app
       - uploads:/app/uploads
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     command: >
       sh -c "alembic upgrade head &&
              python seed/seed_db.py &&
              uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+
+  # ── RQ Worker — scan OCR/rule jobs out of the API process ──
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file: ./backend/.env
+    container_name: codemaze-worker
+    environment:
+      DATABASE_URL: postgresql+asyncpg://codemaze:codemaze@db:5432/codemaze
+      DATABASE_URL_SYNC: postgresql+pg8000://codemaze:codemaze@db:5432/codemaze
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: dev-secret-change-in-production
+      STORAGE_BACKEND: local
+      OCR_ENGINE: tesseract
+    volumes:
+      - ./backend:/app
+      - uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: python -m app.worker
 
   # ── React Frontend ──────────────────────────────
   frontend:

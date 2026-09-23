@@ -1,4 +1,11 @@
-"""Health check endpoint."""
+"""Health check endpoint — DB, Redis, OCR and queue readiness.
+
+Phase 5: extends the original DB+OCR probe with Redis/queue status so a
+deployment misconfiguration (bad REDIS_URL, cold Valkey instance) is visible
+to uptime monitors and operators, not just scan-time failures. Response
+remains safe to expose publicly: failure *categories* only, never
+connection-string content.
+"""
 
 import asyncio
 
@@ -8,6 +15,7 @@ from sqlalchemy import text
 from app.database import get_db
 from app.config import settings
 from app.services.ocr_service import get_ocr_engine_name, ocr_thread_count
+from app.services import redis_service
 
 router = APIRouter(tags=["Health"])
 
@@ -41,7 +49,11 @@ def _db_error_class(exc: Exception) -> str:
 
 @router.get("/health")
 async def health_check(db: AsyncSession = Depends(get_db)):
-    """Health check — verifies database and OCR readiness."""
+    """Health check — verifies database, Redis and OCR readiness.
+
+    UptimeRobot (or any monitor) should ping this path every 5–10 minutes;
+    a 200 keeps the free-tier instance warm and avoids Render cold starts.
+    """
     db_ok = False
     db_error = None
     try:
@@ -53,6 +65,11 @@ async def health_check(db: AsyncSession = Depends(get_db)):
         db_ok = False
         db_error = _db_error_class(exc)
 
+    # Redis (optional): report configured vs actually-reachable so an operator
+    # can tell "queue disabled by design" from "queue broken".
+    redis_configured = bool(settings.REDIS_URL)
+    redis_ok = redis_configured and redis_service.redis_available()
+
     # Report the engine that is actually loaded rather than the configured
     # preference: the previous value always echoed OCR_ENGINE, so a deployment check
     # could not tell which engine had really served the scans.
@@ -60,6 +77,8 @@ async def health_check(db: AsyncSession = Depends(get_db)):
     response = {
         "status": "healthy" if db_ok else "degraded",
         "db_ok": db_ok,
+        "redis_configured": redis_configured,
+        "redis_ok": redis_ok,
         "ocr_engine": active_engine or settings.OCR_ENGINE,
         "ocr_engine_loaded": active_engine is not None,
         "ocr_engine_preferred": settings.OCR_ENGINE,
