@@ -72,7 +72,7 @@ export const ReportProductModal: React.FC<ReportProductModalProps> = ({
           <div className="flex items-center gap-2.5">
             <AlertTriangle className="text-amber-400" size={20} />
             <div>
-              <h3 className="font-bold text-base">{t.reportModalTitle}</h3>
+              <h2 className="font-bold text-base">{t.reportModalTitle}</h2>
               <p className="text-xs text-cyan-200">{reportNumber} — {productName}</p>
             </div>
           </div>

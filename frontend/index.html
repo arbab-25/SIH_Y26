@@ -5,6 +5,15 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/logo.jpeg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Fonts loaded via preconnected <link>s: a CSS @import serialises
+         stylesheet fetches (page CSS -> font CSS) and delays first paint.
+         Same families, same URL — just fetched in parallel. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Devanagari:wght@400;500;600;700&family=Noto+Sans:wght@400;500;600;700&display=swap"
+    />
     <title>CodeMaze - Legal Metrology Compliance Checker</title>
     <meta
       name="description"

@@ -27,7 +27,7 @@ export const HelpDrawer: React.FC<HelpDrawerProps> = ({
           <div className="p-5 bg-[#12355B] text-white flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Shield className="text-cyan-400" size={20} />
-              <h3 className="font-bold text-base">{t.helpDrawerTitle}</h3>
+              <h2 className="font-bold text-base">{t.helpDrawerTitle}</h2>
             </div>
             <button
               onClick={onClose}
@@ -41,20 +41,20 @@ export const HelpDrawer: React.FC<HelpDrawerProps> = ({
           {/* Body Guide */}
           <div className="p-6 space-y-6 text-sm text-slate-700">
             <div>
-              <h4 className="font-bold text-[#12355B] mb-2 flex items-center gap-2">
+              <h3 className="font-bold text-[#12355B] mb-2 flex items-center gap-2">
                 <CheckCircle size={16} className="text-[#16A34A]" />
                 How to photograph packages
-              </h4>
+              </h3>
               <p className="text-xs text-slate-600 leading-relaxed">
                 Position the package on a flat, well-lit surface. Align the principal display panel (PDP) straight inside the camera guide without heavy shadows or reflections. If the image is blurry, hold steady and retake.
               </p>
             </div>
 
             <div>
-              <h4 className="font-bold text-[#12355B] mb-2 flex items-center gap-2">
+              <h3 className="font-bold text-[#12355B] mb-2 flex items-center gap-2">
                 <AlertCircle size={16} className="text-[#0E7490]" />
                 Verdicts & Fail-Closed Logic
-              </h4>
+              </h3>
               <ul className="text-xs text-slate-600 space-y-1.5 list-disc pl-4">
                 <li><strong className="text-[#16A34A]">COMPLIANT:</strong> All mandatory Rule 6 declarations pass regex and standard size checks.</li>
                 <li><strong className="text-[#DC2626]">NON-COMPLIANT:</strong> At least one statutory rule violated (e.g. non-standard pack size, missing tax statement).</li>
@@ -63,10 +63,10 @@ export const HelpDrawer: React.FC<HelpDrawerProps> = ({
             </div>
 
             <div>
-              <h4 className="font-bold text-[#12355B] mb-2 flex items-center gap-2">
+              <h3 className="font-bold text-[#12355B] mb-2 flex items-center gap-2">
                 <BookOpen size={16} className="text-amber-600" />
                 Statutory Citations
-              </h4>
+              </h3>
               <p className="text-xs text-slate-600 leading-relaxed">
                 All non-compliances link directly to the exact legal text in the official Rule Book parsed from RULE_BOOK.pdf. Statutory penalty ranges (Rule 32 & 32A) are displayed for reference.
               </p>

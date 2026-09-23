@@ -120,9 +120,9 @@ export const DetailedAnalysis: React.FC<DetailedAnalysisProps> = ({
                   </div>
 
                   <div className="truncate">
-                    <h4 className="text-sm font-bold text-[#12355B] capitalize">
+                    <h2 className="text-sm font-bold text-[#12355B] capitalize">
                       {field.field_key.replace(/_/g, ' ')}
-                    </h4>
+                    </h2>
                     <p className="text-xs text-slate-500 truncate mt-0.5">
                       {field.field_value || <span className="italic text-slate-400">Not Detected</span>}
                     </p>
@@ -183,9 +183,9 @@ export const DetailedAnalysis: React.FC<DetailedAnalysisProps> = ({
                   {/* Inspector Override Form per §7.3 */}
                   {isEditing ? (
                     <div className="p-4 bg-white border border-[#0E7490] rounded-xl space-y-3 shadow-sm">
-                      <h5 className="font-bold text-[#12355B] uppercase tracking-wider">
+                      <h3 className="font-bold text-[#12355B] uppercase tracking-wider">
                         Manual Inspector Override
-                      </h5>
+                      </h3>
                       <div>
                         <label className="block text-[11px] font-bold text-slate-700 mb-1">
                           Correct Value (as stamped on physical carton)

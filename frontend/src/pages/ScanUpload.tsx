@@ -391,7 +391,7 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({
           <div className="h-16 w-16 rounded-2xl bg-cyan-50 group-hover:bg-[#0E7490] group-hover:text-white text-[#0E7490] flex items-center justify-center transition-all mb-4">
             <Camera size={32} />
           </div>
-          <h3 className="font-bold text-base text-[#12355B]">{t.captureCamera}</h3>
+          <h2 className="font-bold text-base text-[#12355B]">{t.captureCamera}</h2>
           <p className="text-xs text-slate-500 text-center mt-1 max-w-xs">
             {t.cameraDesc}
           </p>
@@ -415,7 +415,7 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({
           <div className="h-16 w-16 rounded-2xl bg-slate-100 group-hover:bg-[#12355B] group-hover:text-white text-slate-600 flex items-center justify-center transition-all mb-4">
             <UploadCloud size={32} />
           </div>
-          <h3 className="font-bold text-base text-[#12355B]">{t.uploadGallery}</h3>
+          <h2 className="font-bold text-base text-[#12355B]">{t.uploadGallery}</h2>
           <p className="text-xs text-slate-500 text-center mt-1 max-w-xs">
             {t.dragDropText}
           </p>
@@ -454,10 +454,10 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({
 
       {/* Inspection Parameters Card */}
       <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
-        <h3 className="text-sm font-bold text-[#12355B] uppercase tracking-wider flex items-center gap-2">
+        <h2 className="text-sm font-bold text-[#12355B] uppercase tracking-wider flex items-center gap-2">
           <Layers size={16} className="text-[#0E7490]" />
           {t.inspectionScope}
-        </h3>
+        </h2>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>

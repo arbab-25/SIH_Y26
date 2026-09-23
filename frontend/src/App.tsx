@@ -148,7 +148,7 @@ export function App() {
               />
             ) : (
               <div className="bg-white rounded-2xl p-12 text-center border border-slate-200 max-w-xl mx-auto">
-                <h3 className="text-base font-bold text-[#12355B] mb-2">No Active Label Scan</h3>
+                <h2 className="text-base font-bold text-[#12355B] mb-2">No Active Label Scan</h2>
                 <p className="text-xs text-slate-500 mb-6">
                   Run a scan to view detailed per-field statutory evaluations.
                 </p>

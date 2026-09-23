@@ -156,7 +156,7 @@ export const RuleBook: React.FC<RuleBookProps> = ({ initialRule, lang }) => {
                         </span>
                         <span className="text-[10px] text-slate-400">{r.chapter}</span>
                       </div>
-                      <h4 className="font-semibold text-xs mt-1 truncate">{r.title}</h4>
+                      <h2 className="font-semibold text-xs mt-1 truncate">{r.title}</h2>
                       {r.highlight && (
                         <p className="text-[11px] text-slate-500 italic mt-1 line-clamp-2">
                           {r.highlight}

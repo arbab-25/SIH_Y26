@@ -49,7 +49,7 @@ export const GuidedTour: React.FC<GuidedTourProps> = ({ isOpen, onClose, lang })
           <span>Inspector Quick Tour ({step + 1} of {steps.length})</span>
         </div>
 
-        <h3 className="text-lg font-bold text-[#12355B] mb-2">{steps[step].title}</h3>
+        <h2 className="text-lg font-bold text-[#12355B] mb-2">{steps[step].title}</h2>
         <p className="text-sm text-slate-600 leading-relaxed mb-6">{steps[step].desc}</p>
 
         <div className="flex items-center justify-between pt-4 border-t border-slate-100">

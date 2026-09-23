@@ -146,9 +146,9 @@ export const ScanSummary: React.FC<ScanSummaryProps> = ({
                 <span className={`inline-block text-[11px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider ${vStyle.badge}`}>
                   {vStyle.text}
                 </span>
-                <h3 className="text-sm font-bold text-[#12355B] mt-1 truncate max-w-[420px]">
+                <h2 className="text-sm font-bold text-[#12355B] mt-1 truncate max-w-[420px]">
                   {scan.product?.name || 'Product name not detected'}
-                </h3>
+                </h2>
               </div>
             </div>
 

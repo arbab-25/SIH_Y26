@@ -93,9 +93,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
         {/* Top Violated Rules (Bar Chart) */}
         <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
           <div>
-            <h3 className="text-sm font-bold text-[#12355B] uppercase tracking-wider">
+            <h2 className="text-sm font-bold text-[#12355B] uppercase tracking-wider">
               Top Violated Rules (Statutory Breaches)
-            </h3>
+            </h2>
             <p className="text-[11px] text-slate-500 mt-0.5">
               Frequency of non-compliances flagged under LM Rules, 2011
             </p>
@@ -123,9 +123,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
         {/* Compliance Trend (Line Chart) */}
         <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
           <div>
-            <h3 className="text-sm font-bold text-[#12355B] uppercase tracking-wider">
+            <h2 className="text-sm font-bold text-[#12355B] uppercase tracking-wider">
               7-Day Enforcement Compliance Trend
-            </h3>
+            </h2>
             <p className="text-[11px] text-slate-500 mt-0.5">
               Breakdown of Compliant vs Non-compliant vs Needs Review decisions
             </p>
@@ -155,9 +155,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
 
       {/* Top Non-Compliant Manufacturers Table */}
       <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
-        <h3 className="text-sm font-bold text-[#12355B] uppercase tracking-wider">
+        <h2 className="text-sm font-bold text-[#12355B] uppercase tracking-wider">
           Top Non-Compliant Manufacturers & Packers
-        </h3>
+        </h2>
         {stats?.top_non_compliant_manufacturers?.length ? <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead>
