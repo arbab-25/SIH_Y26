@@ -6,14 +6,16 @@ Sets up CORS + security headers, includes API routers, and provides a runnable e
 
 import os
 from contextlib import asynccontextmanager
+
+import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
-import uvicorn
 
+from app.api import auth, dashboard, health, reports, rules, scans
 from app.config import settings
-from app.api import auth, health, rules, scans, reports, dashboard
 from app.services.sentry_service import init_sentry
 
 # Sentry (Phase 5): a no-op unless SENTRY_DSN is set in the environment.
@@ -43,6 +45,7 @@ async def lifespan(app: FastAPI):
     # at boot so inspectors get a clear retry message instead of a hang.
     try:
         from sqlalchemy import update
+
         from app.database import async_session_factory
         from app.models.scan import Scan, ScanStatus, Verdict
 
@@ -111,9 +114,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers.setdefault(
             "Permissions-Policy", "camera=(self), microphone=(), geolocation=(self)"
         )
-        if settings.SECURE_COOKIES:
-            # Behind Render/TLS proxies; only meaningful when cookies are ever set
-            response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        # The API is HTTPS-only behind Render's TLS terminator; HSTS is sent
+        # unconditionally (browsers only honour it over HTTPS anyway).
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+        response.headers.setdefault("Cross-Origin-Resource-Policy", "same-site")
         # CSP: allow self-hosted assets + inline styles (status page); scripts stay blocked
         response.headers.setdefault(
             "Content-Security-Policy",
@@ -136,7 +141,6 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 # Mount static uploads directory for serving captured label crops and generated PDFs
 uploads_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads")
 os.makedirs(uploads_dir, exist_ok=True)
-from fastapi.staticfiles import StaticFiles
 app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
 
 # Include API routers under /api/v1
@@ -258,7 +262,7 @@ async def landing():
 <header>
   <div class="wrap nav">
     <a class="brand" href="/">
-      <img src="/logo.jpeg" alt="CODE MAZE logo" onerror="this.style.display='none'">
+      <img src="/logo.jpeg" alt="CODE MAZE logo">
       <div><b>CODE MAZE</b><span>Legal Metrology AI</span></div>
     </a>
     <a class="cta" href="{frontend_url}" target="_blank" rel="noopener">Open the App ↗</a>
@@ -270,7 +274,7 @@ async def landing():
     <div>
       <span class="pill"><span class="dot"></span> Deterministic rule engine · live</span>
       <h1>Every label,<br>checked against <em>every rule</em>.</h1>
-      <p class="lead">CODE MAZE reads packaged-commodity labels with OCR, then verifies all 33 rules of the
+      <p class="lead">CODE MAZE reads packaged-commodity labels with OCR, then verifies all 34 main rules of the
       Legal Metrology (Packaged Commodities) Rules, 2011 — MRP, net quantity, dates, addresses, symbols and more —
       with a deterministic, auditable verdict.</p>
       <div class="hero-actions">
@@ -336,7 +340,7 @@ async def landing():
     <div class="steps">
       <div class="step"><div class="n">1</div><h3>Capture</h3><p>Inspectors photograph any panel — camera, gallery or offline queue that syncs later.</p></div>
       <div class="step"><div class="n">2</div><h3>Enhance &amp; Read</h3><p>Deskew, denoise and contrast-normalize, then OCR (PP-OCR models + Tesseract fallback) extracts every word with confidence.</p></div>
-      <div class="step"><div class="n">3</div><h3>Verify</h3><p>33 main rules from the official 2011 Rule Book run as deterministic checks; barcodes cross-check the GTIN.</p></div>
+      <div class="step"><div class="n">3</div><h3>Verify</h3><p>All 34 main rules from the official 2011 Rule Book run as deterministic checks; barcodes cross-check the GTIN.</p></div>
       <div class="step"><div class="n">4</div><h3>Report</h3><p>Signed PDF &amp; Excel reports with cited rule text — audit-ready for enforcement action.</p></div>
     </div>
   </section>
@@ -349,12 +353,13 @@ async def landing():
 
 </body>
 </html>"""
-    return HTMLResponse(content=html)
+    # The page is a plain string (its CSS braces rule out an f-string), so the
+    # frontend URL is substituted explicitly. Without this every CTA linked to
+    # a literal "{frontend_url}" placeholder.
+    return HTMLResponse(content=html.replace("{frontend_url}", frontend_url))
 
 
 # Serve the logo for the status page (and any branding needs)
-from fastapi.responses import FileResponse
-
 @app.get("/logo.jpeg", include_in_schema=False)
 async def logo():
     for candidate in [
@@ -366,8 +371,6 @@ async def logo():
     return JSONResponse(status_code=404, content={"detail": "logo not found"})
 
 # Demo label images and other static assets used by the landing page
-from fastapi.staticfiles import StaticFiles
-
 _assets_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
 if os.path.isdir(_assets_dir):
     app.mount("/assets", StaticFiles(directory=_assets_dir), name="assets")

@@ -12,8 +12,7 @@ Extracts:
 """
 
 import re
-from typing import Dict, Any, List, Optional
-from rapidfuzz import fuzz, process
+from typing import Any, Dict, List, Optional
 
 from app.utils.regulatory_parsing import is_known_country, parse_relative_period
 
@@ -185,13 +184,13 @@ def _rebuild_display_lines(items: List[Any], fallback_lines: List[str]) -> List[
         current_y = y
     if current:
         lines_out.append(" ".join(current))
-    lines_out = [l.strip() for l in lines_out if l and l.strip()]
+    lines_out = [ln.strip() for ln in lines_out if ln and ln.strip()]
     return lines_out or fallback_lines or [it.text for it in items]
 
 
 def full_multiline_source(lines: List[str]) -> bool:
     """True when the fallback lines already look like real multi-word lines."""
-    return any(len(l.split()) >= 3 for l in lines)
+    return any(len(ln.split()) >= 3 for ln in lines)
 
 
 # Fields that belong to one declaration and must be merged atomically: taking
@@ -302,12 +301,10 @@ def extract_fields_from_ocr(items: List[Any], full_text: Optional[str] = None) -
     # ----------------------------------------------------
     mfg_keywords = ["manufactured by", "mfd by", "packed by", "pkd by", "mktd by", "marketed by",
                     "manufacturedby", "mfdby", "packedby", "pkdby", "mktdby", "marketedby"]
-    mfg_found = False
     for i, line in enumerate(text_lines):
         line_lower = line.lower()
         matched_kw = next((kw for kw in mfg_keywords if kw in line_lower), None)
         if matched_kw:
-            mfg_found = True
             # Attribute the declaration to an OCR item that is actually on this line
             # (the previous items[i] index pointed at an unrelated word, so the crop
             # shown to the inspector did not contain the declaration).
@@ -373,8 +370,7 @@ def extract_fields_from_ocr(items: List[Any], full_text: Optional[str] = None) -
         line_start_for[m.start()] = ls
         line_end_for[m.start()] = le
     for m in pin_split.finditer(combined_text):
-        # Build the merged PIN and treat it as if it started at the first group
-        merged = m.group(1) + m.group(2)
+        # Treat the split PIN as if it started at the first group
         fake_pos = m.start(1)
         ls = combined_text.rfind("\n", 0, m.start(1)) + 1
         le = combined_text.find("\n", m.end())

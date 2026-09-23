@@ -1,13 +1,11 @@
 """Tests for Auth API — register, login (email and mobile), profile, roles."""
 
-import pytest
-import pytest_asyncio
-from httpx import AsyncClient, ASGITransport
-from app.main import app
-from app.database import async_session_factory
-from app.services.auth_service import hash_password
-from app.models.user import User, UserRole
 import uuid
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from app.main import app
 
 
 @pytest.mark.asyncio

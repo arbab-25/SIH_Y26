@@ -1,40 +1,51 @@
 """Scans API Router — Label Upload, OCR Extraction, Rule Validation, Overrides."""
 
+import asyncio
 import logging
 import os
 import re
-import uuid
 import time
-import asyncio
+import uuid
 from datetime import datetime
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request, status, Query
-from fastapi import BackgroundTasks
+
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    status,
+)
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, desc, or_
 from sqlalchemy.orm import selectinload
 
-from app.database import get_db, async_session_factory
+from app.api.deps import get_current_user
 from app.config import settings
-from app.models.user import User
-from app.models.scan import Scan, ScanStatus, Verdict
-from app.models.product import Product
+from app.database import async_session_factory, get_db
 from app.models.extracted_field import ExtractedField
+from app.models.field_override import FieldOverride
+from app.models.product import Product
 from app.models.rule import Rule
 from app.models.rule_version import RuleVersion
-from app.models.violation import Violation, Severity
-from app.models.field_override import FieldOverride
-from app.api.deps import get_current_user
-from app.services.ocr_service import run_ocr
+from app.models.scan import Scan, ScanStatus, Verdict
+from app.models.user import User
+from app.models.violation import Severity, Violation
+from app.services import redis_service
+from app.services.audit_service import hash_input, record_audit
 from app.services.field_extractors import (
+    apply_barcode_crosscheck,
     extract_fields_from_ocr,
     merge_extracted_fields,
-    apply_barcode_crosscheck,
 )
-from app.services import redis_service
-from app.services.audit_service import record_audit, hash_input
+from app.services.ocr_service import run_ocr
 from app.services.rule_engine import evaluate_product_compliance
-from app.utils.image_utils import validate_magic_bytes, strip_exif_keep_orientation
+from app.utils.image_utils import strip_exif_keep_orientation, validate_magic_bytes
 from app.utils.rate_limit import check_rate_limit
 
 router = APIRouter(prefix="/scans", tags=["Scans"])
@@ -378,8 +389,6 @@ async def create_scan(
     Authentication is required — guest mode has been removed; every scan is
     attributed to a signed-in inspector account.
     """
-    start_time = time.time()
-
     # Rate limiting (30/min per user)
     check_rate_limit(str(current_user.id), max_requests=30, window_seconds=60)
 

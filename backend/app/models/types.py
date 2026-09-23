@@ -1,6 +1,6 @@
 """Shared cross-database column types (PostgreSQL + SQLite compatible)."""
 
-from sqlalchemy import Uuid, JSON, Text
+from sqlalchemy import JSON, Text, Uuid
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 
 UUID_TYPE = Uuid(as_uuid=True)

@@ -4,13 +4,12 @@ Guest mode has been removed: every inspector signs in with a real account.
 """
 
 from fastapi import Depends, HTTPException
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.services.auth_service import decode_access_token, get_user_by_id
 from app.models.user import User, UserRole
-
+from app.services.auth_service import decode_access_token, get_user_by_id
 
 security = HTTPBearer(auto_error=False)
 

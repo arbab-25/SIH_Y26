@@ -9,9 +9,10 @@ Validates:
 - Batch / Lot number
 """
 
-import re
 import os
-from typing import Optional, List, Dict, Any
+import re
+from typing import Any, Dict, List, Optional
+
 from app.models.scan import Verdict
 from app.rule_checkers.base import CheckResult
 

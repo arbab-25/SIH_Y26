@@ -1,8 +1,9 @@
 """Pydantic schemas for rules and schedules."""
 
-from pydantic import BaseModel, ConfigDict
-from typing import Optional, Any
+from typing import Any, Optional
 from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict
 
 
 class RuleResponse(BaseModel):

@@ -1,10 +1,12 @@
 """Rule model — legal rules parsed from RULE_BOOK.pdf."""
 
 import uuid
-from sqlalchemy import String, Integer, Text
+
+from sqlalchemy import Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from app.database import Base
-from app.models.types import UUID_TYPE, JSON_TYPE, TSVECTOR_TYPE
+from app.models.types import JSON_TYPE, TSVECTOR_TYPE, UUID_TYPE
 
 
 class Rule(Base):

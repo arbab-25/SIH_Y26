@@ -52,5 +52,5 @@ async def record_audit(
             )
         )
         await db.flush()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"[WARN] audit write failed for action={action}: {exc}")

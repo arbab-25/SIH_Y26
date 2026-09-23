@@ -1,13 +1,15 @@
 """Scan model — each label analysis attempt."""
 
+import enum
 import uuid
 from datetime import datetime
-from sqlalchemy import String, Integer, Numeric, DateTime, ForeignKey, Text
+
+from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from app.database import Base
-from app.models.types import UUID_TYPE, JSON_TYPE
-import enum
+from app.models.types import JSON_TYPE, UUID_TYPE
 
 
 class ScanStatus(str, enum.Enum):

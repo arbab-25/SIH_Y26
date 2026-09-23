@@ -1,0 +1,27 @@
+# Ruff configuration for CODE MAZE backend.
+# Line length is generous and E501 is not selected: the API module embeds a
+# landing-page HTML/CSS string where 88-column lines are unavoidable.
+target-version = "py311"
+line-length = 100
+
+[lint]
+select = [
+    "E4",   # pycodestyle: whitespace/blank-line hygiene
+    "E7",   # pycodestyle: statement-level errors
+    "E9",   # pycodestyle: runtime-level errors (syntax-in-string, etc.)
+    "F",    # pyflakes: unused imports/variables, undefined names
+    "I",    # isort: import ordering
+    "RUF",  # ruff-specific correctness rules
+]
+ignore = [
+    "RUF012", # mutable class attrs: SQLAlchemy models use them by design
+    "RUF001", # ambiguous unicode in strings: en-dashes/× are intentional typography
+    "RUF002", # same, in docstrings
+    "RUF003", # same, in comments
+]
+
+[lint.per-file-ignores]
+# FastAPI's dependency-injection signature pattern (Depends(...) in defaults)
+"app/api/*.py" = ["B008"]
+# Import placement after module docstring metadata blocks
+"app/api/auth.py" = ["E402"]

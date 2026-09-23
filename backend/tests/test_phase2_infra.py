@@ -6,10 +6,9 @@ storage, which is exactly what the no-Redis free tier runs.
 """
 
 import io
-import os
 
 import pytest
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 from app.services import redis_service, storage_service
@@ -69,9 +68,8 @@ def test_s3_driver_roundtrip_with_stubbed_client(monkeypatch, tmp_path):
             calls["client_kwargs"] = kwargs
             return _StubClient()
 
-    import sys, types
+    import sys
 
-    real_boto3 = sys.modules.get("boto3")
     monkeypatch.setitem(sys.modules, "boto3", _FakeBoto3)
     monkeypatch.setenv("S3_ACCESS_KEY_ID", "test-key")
     monkeypatch.setenv("S3_SECRET_ACCESS_KEY", "test-secret")
@@ -119,7 +117,8 @@ def test_cache_roundtrip_with_fake_redis(monkeypatch):
         def setex(self, key, ttl, value):
             store[key] = value
 
-    import sys, types
+    import sys
+    import types
 
     fake_mod = types.ModuleType("redis")
     fake_mod.Redis = _FakeRedis

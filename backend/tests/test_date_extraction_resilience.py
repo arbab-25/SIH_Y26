@@ -9,12 +9,11 @@ a "Feb 2039 is in the future" NON_COMPLIANT violation. Guards:
 - keyword-anchored dates with / and - separators still extract correctly.
 """
 
-import pytest
 
 from app.models.scan import Verdict
+from app.rule_checkers.rule_6_declarations import check_mfg_date_declaration
 from app.services.field_extractors import extract_fields_from_ocr
 from app.services.rule_engine import evaluate_product_compliance
-from app.rule_checkers.rule_6_declarations import check_mfg_date_declaration
 
 
 class FakeOCRItem:

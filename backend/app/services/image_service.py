@@ -8,9 +8,10 @@ Features:
 - Veg/Non-veg color dot detection (Rule 6(8))
 """
 
+from typing import Any, Dict, List, Optional, Tuple
+
 import cv2
 import numpy as np
-from typing import Tuple, Optional, Dict, Any, List
 
 
 def deskew_image(image: np.ndarray, max_angle: float = 15.0) -> Tuple[np.ndarray, float]:
@@ -224,7 +225,7 @@ def detect_veg_nonveg_symbol(image: np.ndarray) -> Dict[str, Any]:
         return {"detected": False, "symbol": None, "confidence": 0.0}
 
     # Inspect top 40% of the image
-    h, w = image.shape[:2]
+    h = image.shape[0]
     top_crop = image[0:int(h * 0.4), :]
 
     hsv = cv2.cvtColor(top_crop, cv2.COLOR_BGR2HSV)

@@ -1,10 +1,12 @@
 """SchedulePackSize model — standard pack quantities from Second Schedule."""
 
 import uuid
+
 from sqlalchemy import String
 from sqlalchemy.orm import Mapped, mapped_column
+
 from app.database import Base
-from app.models.types import UUID_TYPE, JSON_TYPE
+from app.models.types import JSON_TYPE, UUID_TYPE
 
 
 class SchedulePackSize(Base):

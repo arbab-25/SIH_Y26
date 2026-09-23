@@ -9,11 +9,11 @@ scan, and a user-facing error message on failure.
 """
 
 import asyncio
+import io
 
 import pytest
+from httpx import ASGITransport, AsyncClient
 from PIL import Image, ImageDraw
-import io
-from httpx import AsyncClient, ASGITransport
 
 from app.main import app
 from app.services.auth_service import create_access_token

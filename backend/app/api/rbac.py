@@ -20,7 +20,7 @@ supervisor powers.
 from fastapi import Depends, HTTPException
 
 from app.api.deps import get_current_user
-from app.models.user import User, UserRole
+from app.models.user import User
 
 
 def role_value(user: User) -> str:

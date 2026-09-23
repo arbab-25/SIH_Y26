@@ -4,10 +4,12 @@ Validates net quantity against legally permitted pack sizes parsed from RULE_BOO
 
 import json
 import os
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
+
+from rapidfuzz import fuzz, process
+
 from app.models.scan import Verdict
 from app.rule_checkers.base import CheckResult
-from rapidfuzz import process, fuzz
 
 
 def load_second_schedule() -> List[Dict[str, Any]]:

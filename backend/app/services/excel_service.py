@@ -5,10 +5,10 @@ Only profile metadata (id, name, email/mobile, role, office, created_at, last_lo
 """
 
 import io
-from datetime import datetime
-from typing import List, Any
+from typing import List
+
 import openpyxl
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 
@@ -22,7 +22,6 @@ def export_reports_to_excel(reports_data: List[dict]) -> bytes:
     header_fill = PatternFill(start_color="12355B", end_color="12355B", fill_type="solid")
     header_font = Font(name="Arial", size=11, bold=True, color="FFFFFF")
     align_center = Alignment(horizontal="center", vertical="center")
-    align_left = Alignment(horizontal="left", vertical="center")
 
     headers = [
         "Report No", "Date", "Product Name", "Manufacturer", "Category",

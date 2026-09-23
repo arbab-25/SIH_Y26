@@ -1,11 +1,12 @@
 """Integration tests for Scans, Overrides, Reports, PDF export, Email, and Dashboard API."""
 
 import asyncio
+import io
 
 import pytest
-import io
+from httpx import ASGITransport, AsyncClient
 from PIL import Image, ImageDraw
-from httpx import AsyncClient, ASGITransport
+
 from app.main import app
 from app.services.auth_service import create_access_token
 

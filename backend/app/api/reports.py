@@ -6,21 +6,22 @@ import secrets
 import uuid
 from datetime import datetime
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status, Response
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import FileResponse
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, desc
 from sqlalchemy.orm import selectinload
 
-from app.database import get_db
-from app.models.user import User
-from app.models.scan import Scan
-from app.models.report import Report
-from app.models.violation import Violation
 from app.api.deps import get_current_user, get_optional_current_user
-from app.services.pdf_service import generate_compliance_pdf
+from app.database import get_db
+from app.models.report import Report
+from app.models.scan import Scan
+from app.models.user import User
+from app.models.violation import Violation
 from app.services.email_service import send_report_email
 from app.services.excel_service import export_reports_to_excel
+from app.services.pdf_service import generate_compliance_pdf
 from app.services.storage_service import get_storage
 
 router = APIRouter(prefix="/reports", tags=["Reports"])

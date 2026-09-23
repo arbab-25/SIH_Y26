@@ -12,8 +12,8 @@ Design notes (Phase 2):
   beyond `redis` (which RQ already requires).
 """
 
-from typing import Optional, Any, Tuple, cast
 import json
+from typing import Any, Optional, Tuple, cast
 
 from app.config import settings
 
@@ -169,8 +169,8 @@ def fetch_job_status(job_id: str) -> Optional[dict]:
         return None
     try:
         from redis import Redis
-        from rq.job import Job
         from rq.exceptions import NoSuchJobError
+        from rq.job import Job
 
         try:
             job = Job.fetch(job_id, connection=Redis(connection_pool=_get_pool()))

@@ -1,7 +1,8 @@
 """Base classes and data models for deterministic Legal Metrology rule checkers."""
 
 from dataclasses import dataclass
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
+
 from app.models.scan import Verdict
 
 

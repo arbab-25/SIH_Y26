@@ -1,5 +1,6 @@
 from PIL import Image
 
+
 def validate_magic_bytes(header_bytes: bytes) -> bool:
     """Validate that the header bytes match supported image or PDF formats (jpg, png, webp, heic, pdf)."""
     # JPEG: FF D8 FF

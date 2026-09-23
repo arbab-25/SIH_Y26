@@ -2,10 +2,12 @@
 
 import uuid
 from datetime import datetime
-from sqlalchemy import String, DateTime, ForeignKey
+
+from sqlalchemy import DateTime, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from app.database import Base
-from app.models.types import UUID_TYPE, JSON_TYPE
+from app.models.types import JSON_TYPE, UUID_TYPE
 
 
 class AuditLog(Base):

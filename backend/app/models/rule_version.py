@@ -8,8 +8,10 @@ new version row + seed JSON update; no code changes needed.
 
 import uuid
 from datetime import datetime
-from sqlalchemy import String, DateTime, Text, Boolean
+
+from sqlalchemy import Boolean, DateTime, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
+
 from app.database import Base
 from app.models.types import UUID_TYPE
 

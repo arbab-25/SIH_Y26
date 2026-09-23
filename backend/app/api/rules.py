@@ -4,16 +4,16 @@ Deep-links from all violations to exact quoted legal text per §3 & §7.4.
 
 import json
 import os
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_
 from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.rule import Rule
-from app.models.schedule_pack_size import SchedulePackSize
-from app.schemas.rule import RuleResponse, SchedulePackSizeResponse
-from app.services.redis_service import cache_get, cache_set, cache_delete_prefix
+from app.schemas.rule import RuleResponse
+from app.services.redis_service import cache_get, cache_set
 
 router = APIRouter(tags=["Rule Book"])
 

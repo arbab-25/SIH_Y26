@@ -9,21 +9,22 @@ requirements.txt, so OCR silently returned nothing and 'text detection' appeared
 broken. This module now degrades gracefully to Tesseract.
 """
 
-from typing import List, Dict, Any, Optional, Tuple
 import logging
-import numpy as np
-import cv2
 import os
+from typing import Any, Dict, List, Optional, Tuple
 
+import cv2
+import numpy as np
+
+from app.config import settings
 from app.services.image_service import (
-    is_image_blurry,
-    preprocess_image_for_ocr,
-    enhance_for_ocr,
+    calculate_contrast_ratio,
     detect_barcodes,
     detect_veg_nonveg_symbol,
-    calculate_contrast_ratio,
+    enhance_for_ocr,
+    is_image_blurry,
+    preprocess_image_for_ocr,
 )
-from app.config import settings
 
 # Global in-memory engine cache per §5: "Cache OCR models in memory at startup, never per-request"
 _OCR_ENGINE = None
@@ -75,7 +76,6 @@ class _TesseractEngine:
     def __call__(self, image: np.ndarray):
         import pytesseract
 
-        h, w = image.shape[:2]
         try:
             data = pytesseract.image_to_data(
                 image,
@@ -211,7 +211,7 @@ def run_ocr(
         scale = max_dim / float(max(h, w))
         image = cv2.resize(
             image,
-            (max(1, int(round(w * scale))), max(1, int(round(h * scale)))),
+            (max(1, round(int(w * scale))), max(1, round(int(h * scale)))),
             interpolation=cv2.INTER_AREA,
         )
 

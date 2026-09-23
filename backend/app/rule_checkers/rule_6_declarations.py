@@ -13,10 +13,11 @@ Rules:
 
 import re
 from datetime import date
-from typing import Optional, Dict, Any
+from typing import Optional
+
+from app.config import settings
 from app.models.scan import Verdict
 from app.rule_checkers.base import CheckResult
-from app.config import settings
 from app.utils.regulatory_parsing import (
     add_period,
     current_month_index,

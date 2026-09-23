@@ -4,11 +4,11 @@ All runnable against the local SQLite test DB — no external services.
 """
 
 import pytest
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
-from app.main import app
 from app.database import async_session_factory
+from app.main import app
 from app.services import refresh_token_service as rts
 from app.services.audit_service import hash_input
 from app.services.auth_service import create_access_token
@@ -84,8 +84,9 @@ async def test_logout_revokes_refresh_token():
 @pytest.mark.asyncio
 async def test_scan_writes_audit_row():
     """Scanning writes an audit_logs row with action + input hash + user."""
-    from PIL import Image
     import io
+
+    from PIL import Image
 
     buf = io.BytesIO()
     Image.new("RGB", (400, 300), (255, 255, 255)).save(buf, format="JPEG")
@@ -98,7 +99,7 @@ async def test_scan_writes_audit_row():
             headers=_auth_headers(),
         )
         assert resp.status_code == 202
-        scan_id = resp.json()["scan_id"]
+        resp.json()["scan_id"]  # accepted; the audit assertions query the table directly
 
         from app.models.audit_log import AuditLog
 

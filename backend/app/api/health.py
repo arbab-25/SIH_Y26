@@ -10,12 +10,13 @@ connection-string content.
 import asyncio
 
 from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
-from app.database import get_db
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.config import settings
-from app.services.ocr_service import get_ocr_engine_name, ocr_thread_count
+from app.database import get_db
 from app.services import redis_service
+from app.services.ocr_service import get_ocr_engine_name, ocr_thread_count
 
 router = APIRouter(tags=["Health"])
 

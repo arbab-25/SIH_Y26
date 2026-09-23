@@ -1,13 +1,15 @@
 """Violation model — rule violations found during scan analysis."""
 
+import enum
 import uuid
 from datetime import datetime
-from sqlalchemy import String, DateTime, ForeignKey, Text
+
+from sqlalchemy import DateTime, ForeignKey, String, Text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from app.database import Base
 from app.models.types import UUID_TYPE
-import enum
 
 
 class Severity(str, enum.Enum):

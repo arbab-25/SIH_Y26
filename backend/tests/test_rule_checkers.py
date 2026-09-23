@@ -51,24 +51,23 @@ Includes ≥40 independent test cases:
 
 from datetime import date
 
-import pytest
 from app.models.scan import Verdict
+from app.rule_checkers.fssai_checks import run_fssai_checks
 from app.rule_checkers.rule_3_applicability import check_rule_3_applicability
-from app.rule_checkers.rule_26_exemptions import check_rule_26_exemptions
+from app.rule_checkers.rule_5_pack_sizes import check_second_schedule_pack_size
 from app.rule_checkers.rule_6_declarations import (
-    check_manufacturer_details,
-    check_generic_name,
-    check_country_of_origin,
-    check_mrp_declaration,
-    check_mfg_date_declaration,
     check_best_before_declaration,
-    check_consumer_care_details
+    check_consumer_care_details,
+    check_country_of_origin,
+    check_generic_name,
+    check_manufacturer_details,
+    check_mfg_date_declaration,
+    check_mrp_declaration,
 )
+from app.rule_checkers.rule_7_letter_height import check_letter_height_and_pdp_area
 from app.rule_checkers.rule_12_quantity import check_vague_quantity_words
 from app.rule_checkers.rule_13_si_units import check_si_units
-from app.rule_checkers.rule_5_pack_sizes import check_second_schedule_pack_size
-from app.rule_checkers.rule_7_letter_height import check_letter_height_and_pdp_area
-from app.rule_checkers.fssai_checks import run_fssai_checks
+from app.rule_checkers.rule_26_exemptions import check_rule_26_exemptions
 from app.services.rule_engine import evaluate_product_compliance
 
 

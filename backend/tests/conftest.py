@@ -1,8 +1,8 @@
 """Pytest fixtures and configuration."""
 
-import sys
-import os
 import asyncio
+import os
+import sys
 
 # Tests must never inherit a developer or production Neon URL from .env.
 # These variables are set before FastAPI imports application settings.
@@ -15,7 +15,6 @@ backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
-import pytest
 
 
 def pytest_configure(config):
@@ -28,11 +27,12 @@ def pytest_configure(config):
         async def _prepare():
             import json
             import uuid as _uuid
-            from app.database import Base, engine, async_session_factory
-            from app.services.auth_service import hash_password
-            from app.models.user import User, UserRole
+
+            from app.database import Base, async_session_factory, engine
             from app.models.rule import Rule
             from app.models.schedule_pack_size import SchedulePackSize
+            from app.models.user import User, UserRole
+            from app.services.auth_service import hash_password
 
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.drop_all)

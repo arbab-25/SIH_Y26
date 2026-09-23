@@ -6,7 +6,7 @@ from typing import Optional
 
 import bcrypt
 import jwt
-from sqlalchemy import select, or_
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -101,9 +101,9 @@ async def authenticate_user(
     """Authenticate by email or mobile. Returns User or None."""
     # Determine if identifier is email or mobile
     if "@" in identifier:
-        stmt = select(User).where(User.email == identifier, User.is_active == True)
+        stmt = select(User).where(User.email == identifier, User.is_active.is_(True))
     else:
-        stmt = select(User).where(User.mobile == identifier, User.is_active == True)
+        stmt = select(User).where(User.mobile == identifier, User.is_active.is_(True))
 
     result = await db.execute(stmt)
     user = result.scalar_one_or_none()

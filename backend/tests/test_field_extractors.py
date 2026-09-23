@@ -12,7 +12,6 @@ rather than by inventing input:
 4. "Per 100gm" from the nutrition table became the declared net quantity.
 """
 
-import pytest
 
 from app.models.scan import Verdict
 from app.services.field_extractors import extract_fields_from_ocr

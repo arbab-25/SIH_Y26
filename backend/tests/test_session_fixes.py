@@ -18,9 +18,9 @@ import os
 import pytest
 
 from app.models.scan import Verdict
-from app.services.rule_engine import evaluate_product_compliance
 from app.rule_checkers.fssai_checks import run_fssai_checks
 from app.rule_checkers.rule_24_wholesale import check_wholesale_declarations
+from app.services.rule_engine import evaluate_product_compliance
 from seed.seed_db import _demo_credentials
 
 BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -47,6 +47,7 @@ def _compliant_product() -> dict:
 # ----------------------------------------------------------------------
 def test_pipeline_runs_crosscheck_after_extraction():
     import inspect
+
     from app.api import scans
 
     src = inspect.getsource(scans._process_scan)
@@ -224,6 +225,7 @@ def test_advisories_excluded_from_compliance_score():
 # ----------------------------------------------------------------------
 def test_enhance_for_ocr_avoids_nlmeans():
     import inspect
+
     from app.services import image_service
 
     src = inspect.getsource(image_service.enhance_for_ocr)
@@ -236,6 +238,7 @@ def test_enhance_for_ocr_avoids_nlmeans():
 
 def test_enhance_for_ocr_output_is_bgr():
     import numpy as np
+
     from app.services import image_service
 
     img = np.full((120, 160, 3), 200, dtype=np.uint8)

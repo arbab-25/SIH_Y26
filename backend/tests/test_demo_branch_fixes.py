@@ -28,6 +28,7 @@ from app.services.barcode_service import (
 )
 from app.services.field_extractors import ExtractedData
 from app.services.image_service import OCR_MAX_DIM, preprocess_image_for_ocr
+from app.services.rule_engine import evaluate_product_compliance
 
 
 def _fssai(**overrides):
@@ -43,7 +44,6 @@ def _fssai(**overrides):
     )
     kwargs.update(overrides)
     return run_fssai_checks(**kwargs)
-from app.services.rule_engine import evaluate_product_compliance
 
 SEED_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "seed", "rules.json")
 

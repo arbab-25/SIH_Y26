@@ -1,7 +1,7 @@
 """Phase 5 DevOps tests: deep health payload + optional Sentry init."""
 
 import pytest
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 from app.services import redis_service
@@ -29,8 +29,9 @@ async def test_health_reports_redis_and_ocr_fields(monkeypatch):
 
 def test_init_sentry_disabled_without_dsn(monkeypatch):
     """No SENTRY_DSN -> init is a no-op returning False (and imports nothing)."""
-    from app.services.sentry_service import init_sentry
     import builtins
+
+    from app.services.sentry_service import init_sentry
 
     real_import = builtins.__import__
 
@@ -47,7 +48,7 @@ def test_init_sentry_disabled_without_dsn(monkeypatch):
 def test_init_sentry_reports_missing_package(monkeypatch):
     """DSN set but SDK absent -> warn and continue, never crash the service."""
     import sys
-    import types
+
     from app.services import sentry_service
 
     monkeypatch.setenv("SENTRY_DSN", "https://public@example.ingest.sentry.io/1")

@@ -7,11 +7,10 @@ deterministic field extractors; a Hindi-only label routes to NEEDS_REVIEW
 (fail-closed), never a fabricated verdict.
 """
 
-import pytest
 
 from app.config import settings
 from app.services import ocr_service
-from app.services.field_extractors import extract_fields_from_ocr, ExtractedData
+from app.services.field_extractors import extract_fields_from_ocr
 from app.services.ocr_service import OCRItem
 
 

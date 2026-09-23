@@ -7,9 +7,9 @@ Rules:
 """
 
 from typing import Optional
+
 from app.models.scan import Verdict
 from app.rule_checkers.base import CheckResult
-from app.config import settings
 
 
 def check_si_units(

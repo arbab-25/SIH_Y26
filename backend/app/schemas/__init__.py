@@ -1,10 +1,11 @@
 """Pydantic schemas for auth endpoints."""
 
-from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
+import re
+from datetime import datetime
 from typing import Optional
 from uuid import UUID
-from datetime import datetime
-import re
+
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 class RegisterRequest(BaseModel):

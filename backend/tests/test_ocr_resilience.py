@@ -8,7 +8,7 @@ attribution), and the startup sweep that fails interrupted scans.
 """
 
 import pytest
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
 from app.main import app
@@ -50,7 +50,7 @@ def test_rapidocr_engine_is_constructed_with_configured_threads(monkeypatch):
     fake_mod.RapidOCR = FakeRapidOCR
     monkeypatch.setitem(__import__("sys").modules, "rapidocr_onnxruntime", fake_mod)
 
-    engine = ocr_service._RapidOCREngine()
+    ocr_service._RapidOCREngine()
     assert captured["threads"] == 2
 
 
@@ -78,7 +78,8 @@ def test_engine_preference_tesseract_is_honored(monkeypatch):
         def __call__(self, image):
             return []
 
-    import types, sys
+    import sys
+    import types
     fake_mod = types.ModuleType("rapidocr_onnxruntime")
     fake_mod.RapidOCR = FakeRapid
     monkeypatch.setitem(sys.modules, "rapidocr_onnxruntime", fake_mod)
@@ -158,8 +159,8 @@ def _white_image():
 @pytest.mark.asyncio
 async def test_startup_sweep_fails_orphaned_scans():
     """QUEUED/PROCESSING rows at boot become FAILED with a retry message."""
-    import asyncio
     import uuid as uuid_mod
+
     from app.database import async_session_factory
     from app.models.scan import Scan, ScanStatus, Verdict
 

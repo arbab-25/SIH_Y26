@@ -7,32 +7,33 @@ Hardening per security checklist:
 """
 
 import re
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 # RFC 6750 token-type value. A module constant (not a bare kwarg literal):
 # security linters flag `token_type="bearer"` as a possible hardcoded secret
 # because of the 'token' in the keyword name — it is a scheme label, not one.
 BEARER_TOKEN_TYPE = "bearer"  # nosec B105 — RFC 6750 scheme label, not a credential
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import uuid
+from app.api.deps import get_current_user
 from app.database import get_db
 from app.models.user import User
 from app.schemas import (
-    RegisterRequest,
-    LoginRequest,
     AuthResponse,
-    UserResponse,
-    TokenResponse,
+    LoginRequest,
     RefreshRequest,
-)
-from app.services.auth_service import (
-    authenticate_user,
-    register_user,
-    create_access_token,
+    RegisterRequest,
+    TokenResponse,
+    UserResponse,
 )
 from app.services import refresh_token_service
-from app.api.deps import get_current_user
+from app.services.auth_service import (
+    authenticate_user,
+    create_access_token,
+    register_user,
+)
 from app.utils.rate_limit import check_rate_limit
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -116,7 +117,7 @@ async def register(req: RegisterRequest, request: Request, db: AsyncSession = De
     except ValueError as e:
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception as e:
+    except Exception:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

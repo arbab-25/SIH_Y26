@@ -65,7 +65,7 @@ The script prints only the account emails, never the passwords.
 
 ```text
 cd frontend && npm ci && npm run build && npm run lint
-cd ../backend && python -m pytest          # 192 tests, ~8 s
+cd ../backend && python -m pytest          # 207 tests, ~10 s
 cd ../backend && python scripts/benchmark_ocr.py   # OCR field precision/recall
 cd ../backend && pip-audit -r requirements.txt && bandit -q -r app   # 0 known vulnerabilities / 0 findings
 cd ../frontend && npx playwright install chromium && npm run e2e   # needs E2E_TEST_EMAIL/PASSWORD
@@ -103,7 +103,7 @@ Preprocessing was re-profiled after the NL-means stage measured as the single la
 
 Every mandatory declaration in Rule 6(1) of the Legal Metrology (Packaged Commodities) Rules, 2011 is checked by a deterministic regex/rule function — no model decides a verdict. Each extracted field carries the OCR confidence and the crop it came from, and a declaration that could not be read is reported as NEEDS_REVIEW rather than as compliance or a violation. Every violation cites the rule the checker applied, resolved against the seeded rule book, and links to that rule's quoted text.
 
-The seeded rule book covers **all 33 main rules** (1–34 including 32A; 31 was omitted by amendment) extracted verbatim from `RULE_BOOK.pdf`, plus human-curated sub-rule entries — 55 rows in total. Regenerate with `python seed/parse_rulebook.py` (run from `backend/`); the script fails its own build if any main rule goes missing.
+The seeded rule book covers **all 34 main rules** (1–34 including 32A; 31 was omitted by amendment) extracted verbatim from `RULE_BOOK.pdf`, plus human-curated sub-rule entries — 55 rows in total. Regenerate with `python seed/parse_rulebook.py` (run from `backend/`); the script fails its own build if any main rule goes missing.
 
 Wholesale packages are evaluated against **Rule 24** (manufacturer/address, commodity identity, total quantity) instead of the retail Rule 6 set. Advisory measurements — label contrast (Rule 9(1)(b)), the machine-decoded barcode, and FSSAI-check availability — are displayed and stored in the scan metadata but never gate a verdict or the compliance score.
 
@@ -165,3 +165,31 @@ Free plan, 50 monitors: HTTP monitor → `https://codemaze-api-m6f0.onrender.com
 every 5–10 minutes. The deep health check reports `db_ok`, `redis_ok` and the
 loaded OCR engine, so the monitor doubles as a status dashboard. This keeps
 the Render instance warm and avoids ~50 s cold-start spins for inspectors.
+A second, cheaper monitor can ping `/health` (a bare `200 {"status":"ok"}`)
+for liveness-only checks.
+
+### API landing page
+
+Opening `https://codemaze-api-m6f0.onrender.com/` in a browser serves a branded
+product page (not raw JSON): animated scan hero, the two committed demo labels
+with their real verdicts (served from `/assets/demo/`), the pipeline explainer,
+and working CTAs to the web app and `/docs`. The page is a dependency-free
+HTML string inside `app/main.py`; its frontend links are substituted from
+`CORS_ORIGINS` at request time.
+
+### External ratings & audits (how to reproduce)
+
+The deployment is scored against public, well-known checkers; re-run these after
+every deploy to keep the numbers honest:
+
+| Checker | What it measures | How to run | Current result |
+| --- | --- | --- | --- |
+| Google PageSpeed / Lighthouse | Performance, a11y, best practices, SEO | Run against the frontend URL in Chrome DevTools → Lighthouse | run post-deploy, record here |
+| Mozilla HTTP Observatory | Header/security configuration | <https://developer.mozilla.org/en-US/observatory> | A-grade headers shipped (CSP, HSTS, XFO, COOP, CORP, nosniff, Referrer/Permissions-Policy) |
+| SecurityHeaders.com | Header grade | <https://securityheaders.com> scan of the API URL | same header set applies |
+| SSL Labs | TLS configuration | <https://www.ssllabs.com/ssltest/> (Render's shared cert) | platform-managed |
+| Internal battery | code quality | `pytest`, `ruff`, `mypy`, `bandit`, `pip-audit`, `tsc`, `oxlint`, `npm audit` | all green (207 tests) |
+
+The header set is applied by `SecurityHeadersMiddleware` in `backend/app/main.py`;
+CSP is strict (`default-src 'none'`, scripts blocked, frame-ancestors 'none'),
+HSTS is always on behind Render's TLS.

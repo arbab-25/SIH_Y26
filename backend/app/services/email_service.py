@@ -4,12 +4,13 @@ using Resend API or standard SMTP with 3 retries and exponential backoff.
 Logs every attempt in email_logs.
 """
 
-import os
-import base64
 import asyncio
-import httpx
+import base64
+import os
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import Any, Dict, List, Optional
+
+import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings

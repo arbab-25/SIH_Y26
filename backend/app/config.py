@@ -1,10 +1,9 @@
 """Application configuration loaded from environment variables."""
 
-import re
+from typing import Optional
+
 from pydantic import field_validator
 from pydantic_settings import BaseSettings
-from typing import Optional
-import os
 
 # libpq-only query params that managed-Postgres providers (Neon/Render/Supabase)
 # append to connection strings. asyncpg rejects them with
@@ -134,7 +133,7 @@ class Settings(BaseSettings):
         """Remove libpq-only query params from a connection URL (query-aware)."""
         if "?" not in url:
             return url
-        from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+        from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
         parts = urlsplit(url)
         kept = [
             (k, v)

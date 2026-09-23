@@ -5,14 +5,10 @@ pipeline: it may confirm or demote an OCR'd GTIN, never invent a declaration
 by itself. These tests pin that contract.
 """
 
-import io
 
 import numpy as np
 import pytest
-from PIL import Image, ImageDraw
-from httpx import AsyncClient, ASGITransport
 
-from app.main import app
 from app.services import image_service, ocr_service
 from app.services.auth_service import create_access_token
 
@@ -118,7 +114,7 @@ def test_run_ocr_includes_barcode_metadata(monkeypatch):
         ocr_service, "detect_barcodes", lambda img: {"detected": True, "results": [{"type": "EAN13", "data": "8901234567890", "confidence": 1.0, "bbox": None}]}
     )
 
-    items, meta = ocr_service.run_ocr(_white(60, 180), detect_blur=True)
+    _items, meta = ocr_service.run_ocr(_white(60, 180), detect_blur=True)
     assert meta["barcodes"]["detected"] is True
     assert meta["barcodes"]["results"][0]["data"] == "8901234567890"
 
@@ -200,11 +196,11 @@ def test_benchmark_ground_truth_dataset_is_well_formed():
 
 def test_benchmark_metrics_functions():
     """Precision/recall math used by the benchmark script is correct."""
-    import sys
     import os
+    import sys
 
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-    from scripts.benchmark_ocr import precision_recall_for_field, aggregate_report
+    from scripts.benchmark_ocr import aggregate_report, precision_recall_for_field
 
     tp, fp, fn = 8, 2, 2
     p, r = precision_recall_for_field(tp, fp, fn)

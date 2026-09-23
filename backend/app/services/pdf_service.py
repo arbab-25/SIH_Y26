@@ -5,10 +5,10 @@ violations table with rule citations, OCR confidence summary, and physical verif
 """
 
 import os
-import uuid
-import fitz  # PyMuPDF
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
+
+import fitz  # PyMuPDF
 
 
 def generate_compliance_pdf(
@@ -72,7 +72,7 @@ def generate_compliance_pdf(
     page.insert_text((42, 117), f"Date & Time: {gen_at}", fontsize=9, color=TEXT_MUTED, fontname="helv")
 
     page.insert_text((240, 102), f"Inspector: {inspector}", fontsize=10, color=TEXT_DARK, fontname="helv")
-    page.insert_text((240, 117), f"Ruleset: LM (PC) Rules, 2011 (as amended)", fontsize=9, color=TEXT_MUTED, fontname="helv")
+    page.insert_text((240, 117), "Ruleset: LM (PC) Rules, 2011 (as amended)", fontsize=9, color=TEXT_MUTED, fontname="helv")
 
     # Verdict Badge Box
     v_box = fitz.Rect(435, 92, 555, 118)

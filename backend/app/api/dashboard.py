@@ -1,15 +1,16 @@
 """Dashboard API Router — Enforcement Statistics, Compliance Trends, Top Violations per §7.8."""
 
 from datetime import datetime, timedelta
+
 from fastapi import APIRouter, Depends
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, desc
 
 from app.database import get_db
-from app.models.scan import Scan, Verdict
-from app.models.rule import Rule
-from app.models.violation import Violation
 from app.models.product import Product
+from app.models.rule import Rule
+from app.models.scan import Scan, Verdict
+from app.models.violation import Violation
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
@@ -55,7 +56,8 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
     # Real average only: a placeholder percentage here would report an OCR quality
     # figure that no scan produced.
     avg_conf_res = await db.execute(
-        select(func.avg(Scan.avg_ocr_confidence)).where(Scan.avg_ocr_confidence != None)
+        # .is_not(None) is the typed SQLAlchemy 2 form of `IS NOT NULL`
+        select(func.avg(Scan.avg_ocr_confidence)).where(Scan.avg_ocr_confidence.is_not(None))
     )
     avg_conf_value = avg_conf_res.scalar()
     avg_ocr_confidence = round(float(avg_conf_value), 2) if avg_conf_value is not None else 0.0

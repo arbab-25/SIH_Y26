@@ -12,10 +12,8 @@ the client contract is unchanged: whichever side finishes the work, the scan
 row carries the outcome.
 """
 
-import asyncio
 import os
 import sys
-import time
 
 
 def process_scan_job(scan_id: str, payload: dict) -> dict:
@@ -33,7 +31,7 @@ def process_scan_job(scan_id: str, payload: dict) -> dict:
 
 if __name__ == "__main__":
     from redis import Redis
-    from rq import Worker, Queue
+    from rq import Queue, Worker
 
     url = os.environ.get("REDIS_URL", "")
     if not url:
