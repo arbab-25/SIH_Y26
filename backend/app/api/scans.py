@@ -29,6 +29,7 @@ from app.services.field_extractors import (
     merge_extracted_fields,
     apply_barcode_crosscheck,
 )
+from app.services import redis_service
 from app.services.rule_engine import evaluate_product_compliance
 from app.utils.image_utils import validate_magic_bytes, strip_exif_keep_orientation
 from app.utils.rate_limit import check_rate_limit
@@ -270,6 +271,33 @@ async def _process_scan(
             print(f"[ERROR] Background scan processing failed for {scan_id}: {exc}")
 
 
+# Persistent event loop for the RQ worker path: SQLAlchemy async engines bind
+# connections to the loop they first connect on, so a fresh loop per job would
+# poison the pool. One loop per worker process keeps the engine reusable.
+_worker_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+def process_scan_sync(scan_id: str, payload: dict) -> dict:
+    """Synchronous entry point for RQ workers (app/worker.py).
+
+    Runs the SAME async pipeline the in-process fallback uses, on the worker's
+    persistent event loop. The scan row is the single source of truth either
+    way, so the polling endpoint needs no knowledge of which side ran.
+    """
+    global _worker_loop
+    if _worker_loop is None or _worker_loop.is_closed():
+        _worker_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(_worker_loop)
+    coro = _process_scan(
+        uuid.UUID(scan_id),
+        is_imported=bool(payload.get("is_imported", False)),
+        pdp_height_cm=payload.get("pdp_height_cm"),
+        pdp_width_cm=payload.get("pdp_width_cm"),
+        measured_glyph_height_mm=payload.get("measured_glyph_height_mm"),
+    )
+    return _worker_loop.run_until_complete(coro) or {"status": "done"}
+
+
 def _val(extracted: dict, key: str):
     """Read the plain value of an extracted field.
 
@@ -368,23 +396,72 @@ async def create_scan(
     db.add(scan)
     await db.commit()
 
-    background_tasks.add_task(
-        _process_scan,
-        scan_id,
-        is_imported,
-        pdp_height_cm,
-        pdp_width_cm,
-        measured_glyph_height_mm,
-    )
+    # Dispatch: RQ + Redis when configured (OCR runs in a worker process and
+    # never occupies the API's event loop); in-process background task as the
+    # zero-dependency fallback. The 202 + poll contract is identical either way.
+    job_payload = {
+        "is_imported": is_imported,
+        "pdp_height_cm": pdp_height_cm,
+        "pdp_width_cm": pdp_width_cm,
+        "measured_glyph_height_mm": measured_glyph_height_mm,
+    }
+    job_id = redis_service.enqueue_scan_job(str(scan_id), job_payload)
+    if job_id is None:
+        background_tasks.add_task(
+            _process_scan,
+            scan_id,
+            is_imported,
+            pdp_height_cm,
+            pdp_width_cm,
+            measured_glyph_height_mm,
+        )
+        dispatch = "in-process"
+    else:
+        dispatch = "rq"
 
     return {
         "id": str(scan.id),
         "scan_id": str(scan.id),
+        "job_id": job_id,
+        "dispatch": dispatch,
         "status": scan.status.value,
         "verdict": None,
         "compliance_score": None,
         "processing_time_ms": None,
         "message": "Scan accepted; poll GET /api/v1/scans/{scan_id} until status is done or failed."
+    }
+
+
+@router.get("/{scan_id}/job")
+async def get_scan_job_status(
+    scan_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Job-status endpoint for the async pipeline (Phase 2).
+
+    Combines two sources: the RQ job state in Redis (queued/started/finished/
+    failed) when the job was dispatched to a worker, and the scans row itself
+    (queued/processing/done/failed) which is authoritative for the verdict.
+    Authentication and visibility rules match GET /scans/{id}.
+    """
+    res = await db.execute(select(Scan).where(Scan.id == scan_id))
+    scan = res.scalar_one_or_none()
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    if scan.user_id and scan.user_id != current_user.id and current_user.role.value not in ("ADMIN", "SENIOR_OFFICER"):
+        raise HTTPException(status_code=403, detail="Not authorized to view this scan")
+
+    rq_status = redis_service.fetch_job_status(f"scan-{scan_id}")
+    return {
+        "scan_id": str(scan.id),
+        "scan_status": scan.status.value,
+        "verdict": scan.verdict.value if scan.verdict else None,
+        "compliance_score": float(scan.compliance_score) if scan.compliance_score is not None else None,
+        "processing_time_ms": scan.processing_time_ms,
+        "error_message": scan.error_message,
+        "job": rq_status,
+        "done": scan.status in (ScanStatus.DONE, ScanStatus.FAILED),
     }
 
 

@@ -23,6 +23,9 @@ python-multipart==0.0.20
 python-dotenv==1.0.1
 httpx==0.28.1
 aiofiles==24.1.0
+redis==5.2.1
+rq==2.1
+boto3==1.35.90
 pytest==8.3.4
 pytest-asyncio==0.25.0
 # psycopg2-binary removed for local SQLite dev; use pg8000 for sync PostgreSQL

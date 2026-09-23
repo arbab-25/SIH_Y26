@@ -20,6 +20,7 @@ from app.api.deps import get_current_user, get_optional_current_user
 from app.services.pdf_service import generate_compliance_pdf
 from app.services.email_service import send_report_email
 from app.services.excel_service import export_reports_to_excel
+from app.services.storage_service import get_storage
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
 
@@ -154,6 +155,12 @@ async def create_report(
             output_path=pdf_path,
             logo_path=logo_path if os.path.exists(logo_path) else None
         )
+        # STORAGE_BACKEND=s3 mirrors the PDF to the object store so reports
+        # survive container restarts (Render disks are ephemeral). The local
+        # copy stays for the immediate FileResponse; open_bytes() retrieves
+        # from S3/R2 when the local file is gone.
+        with open(pdf_path, "rb") as f:
+            get_storage().save(f"reports/{pdf_filename}", f.read(), "application/pdf")
     except Exception as e:
         print(f"[WARN] PDF generation error: {e}")
 
@@ -266,7 +273,18 @@ async def download_report_pdf(
     pdf_path = os.path.join(backend_root, "uploads", "reports", f"{report.report_number}.pdf")
 
     if not os.path.exists(pdf_path):
-        # Regenerate if missing
+        # Local copy gone (fresh container): restore from the storage layer
+        # (S3/R2 when configured) before regenerating from scratch.
+        try:
+            data = get_storage().open_bytes(f"reports/{report.report_number}.pdf")
+            os.makedirs(os.path.dirname(pdf_path), exist_ok=True)
+            with open(pdf_path, "wb") as f:
+                f.write(data)
+        except Exception:
+            pass
+
+    if not os.path.exists(pdf_path):
+        # Regenerate if still missing
         stmt_scan = (
             select(Scan)
             .where(Scan.id == report.scan_id)

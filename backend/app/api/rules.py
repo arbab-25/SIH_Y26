@@ -13,8 +13,16 @@ from app.database import get_db
 from app.models.rule import Rule
 from app.models.schedule_pack_size import SchedulePackSize
 from app.schemas.rule import RuleResponse, SchedulePackSizeResponse
+from app.services.redis_service import cache_get, cache_set, cache_delete_prefix
 
 router = APIRouter(tags=["Rule Book"])
+
+# The rule book is amended rarely; cache full listing + single rules for an
+# hour. cache_get/set no-op when Redis isn't configured, so local dev and the
+# Redis-less free tier are unaffected.
+RULES_CACHE_KEY = "rules:all"
+RULE_CACHE_KEY_PREFIX = "rules:one:"
+RULES_TTL_SECONDS = 3600
 
 
 @router.get("/rules", response_model=list[RuleResponse])
@@ -40,8 +48,9 @@ async def list_rules(
     result = await db.execute(stmt)
     rules = result.scalars().all()
 
-    # Add highlighted snippet if search query provided
     res = []
+    # Add highlighted snippet if search query provided (cache the serialized
+    # response only for the unfiltered call; search/chapter queries stay live).
     for r in rules:
         r_dict = {
             "id": r.id,
@@ -65,10 +74,36 @@ async def list_rules(
     return res
 
 
+@router.get("/rules/cached-all", response_model=list[RuleResponse])
+async def list_rules_cached(db: AsyncSession = Depends(get_db)):
+    """Redis-cached variant of the full rule listing (Phase 2 demonstration).
+
+    Identical payload to GET /rules with no filters; the cache is checked
+    before Postgres. A cache miss or Redis outage simply falls through to the
+    database, so this endpoint is always at least as available as /rules.
+    """
+    cached = cache_get(RULES_CACHE_KEY)
+    if cached is not None:
+        return [RuleResponse(**r) for r in cached]
+
+    result = await db.execute(select(Rule))
+    rules = result.scalars().all()
+    serialized = [RuleResponse.model_validate(r).model_dump(mode="json") for r in rules]
+    cache_set(RULES_CACHE_KEY, serialized, ttl=RULES_TTL_SECONDS)
+    return [RuleResponse(**r) for r in serialized]
+
+
 @router.get("/rules/{rule_number}", response_model=RuleResponse)
 async def get_rule_by_number(rule_number: str, db: AsyncSession = Depends(get_db)):
     """Deep-link endpoint to get exact rule by rule_number (e.g. rule-6-1-e)."""
     clean_num = rule_number.strip().lower()
+
+    # Violations deep-link here on every scan detail view; cache per rule.
+    cache_key = RULE_CACHE_KEY_PREFIX + clean_num
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return RuleResponse(**cached)
+
     stmt = select(Rule).where(Rule.rule_number == clean_num)
     result = await db.execute(stmt)
     rule = result.scalar_one_or_none()
@@ -82,7 +117,9 @@ async def get_rule_by_number(rule_number: str, db: AsyncSession = Depends(get_db
     if not rule:
         raise HTTPException(status_code=404, detail=f"Rule '{rule_number}' not found")
 
-    return RuleResponse.model_validate(rule)
+    response = RuleResponse.model_validate(rule)
+    cache_set(cache_key, response.model_dump(mode="json"), ttl=RULES_TTL_SECONDS)
+    return response
 
 
 @router.get("/schedules/{name}")

@@ -40,8 +40,9 @@ class Settings(BaseSettings):
     RESEND_API_KEY: Optional[str] = None
     MAIL_FROM: str = "CODE MAZE <onboarding@resend.dev>"
 
-    # Storage
-    STORAGE_BACKEND: str = "local"  # "local" or "supabase"
+    # Storage — "local" (default) or "s3" (any S3-compatible API: AWS S3,
+    # Cloudflare R2 10GB free tier, Backblaze B2, MinIO). Credentials via env only.
+    STORAGE_BACKEND: str = "local"
     SUPABASE_URL: str = ""
     SUPABASE_KEY: str = ""
     SUPABASE_BUCKET: str = "codemaze-uploads"
