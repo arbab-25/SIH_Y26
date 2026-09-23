@@ -10,14 +10,23 @@ import re
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import uuid
 from app.database import get_db
 from app.models.user import User
-from app.schemas import RegisterRequest, LoginRequest, AuthResponse, UserResponse, TokenResponse
+from app.schemas import (
+    RegisterRequest,
+    LoginRequest,
+    AuthResponse,
+    UserResponse,
+    TokenResponse,
+    RefreshRequest,
+)
 from app.services.auth_service import (
     authenticate_user,
     register_user,
     create_access_token,
 )
+from app.services import refresh_token_service
 from app.api.deps import get_current_user
 from app.utils.rate_limit import check_rate_limit
 
@@ -62,9 +71,15 @@ async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(
         )
 
     token = create_access_token(str(user.id), user.role.value if hasattr(user.role, "value") else str(user.role))
+
+    refresh_raw = refresh_token_service.issue_refresh_token(
+        db,
+        user.id,
+        user_agent=request.headers.get("user-agent"),
+    )
     return AuthResponse(
         user=UserResponse.model_validate(user),
-        token=TokenResponse(access_token=token, token_type="bearer")
+        token=TokenResponse(access_token=token, refresh_token=refresh_raw, token_type="bearer"),
     )
 
 
@@ -104,10 +119,72 @@ async def register(req: RegisterRequest, request: Request, db: AsyncSession = De
         )
 
     token = create_access_token(str(user.id), user.role.value if hasattr(user.role, "value") else str(user.role))
+
+    refresh_raw = refresh_token_service.issue_refresh_token(
+        db,
+        user.id,
+        user_agent=request.headers.get("user-agent"),
+    )
     return AuthResponse(
         user=UserResponse.model_validate(user),
-        token=TokenResponse(access_token=token, token_type="bearer")
+        token=TokenResponse(access_token=token, refresh_token=refresh_raw, token_type="bearer"),
     )
+
+
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh(req: RefreshRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    """Exchange a refresh token for a new access+refresh pair (rotation).
+
+    Reuse of an already-rotated token revokes the whole token family (theft
+    detection) and answers 401.
+    """
+    check_rate_limit(
+        f"refresh:{_client_ip(request)}",
+        max_requests=30,
+        window_seconds=300,
+    )
+    result = await refresh_token_service.rotate_refresh_token(
+        db, req.refresh_token, user_agent=request.headers.get("user-agent")
+    )
+    if result is None:
+        # COMMIT (not rollback): a reuse-of-rotated-token attempt just triggered
+        # the family revocation — that theft response must be persisted even
+        # though the caller is rejected.
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token is invalid, expired, or revoked",
+        )
+    user_id, new_refresh, _family = result
+
+    user = await db.get(User, user_id)
+    if user is None or not user.is_active:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account unavailable")
+
+    token = create_access_token(str(user.id), user.role.value if hasattr(user.role, "value") else str(user.role))
+    await db.commit()
+    return TokenResponse(access_token=token, refresh_token=new_refresh, token_type="bearer")
+
+
+@router.post("/logout")
+async def logout(req: RefreshRequest, db: AsyncSession = Depends(get_db)):
+    """Revoke the presented refresh token (client also drops its access JWT)."""
+    revoked = await refresh_token_service.revoke_token(db, req.refresh_token)
+    await db.commit()
+    return {"status": "logged_out", "revoked": revoked}
+
+
+@router.post("/logout-all")
+async def logout_all(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Revoke every refresh token for the current user (logout everywhere)."""
+    count = await refresh_token_service.revoke_all_for_user(db, current_user.id)
+    await db.commit()
+    return {"status": "logged_out_everywhere", "revoked_sessions": count}
 
 
 @router.get("/me", response_model=UserResponse)

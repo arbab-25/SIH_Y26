@@ -53,7 +53,14 @@ class LoginRequest(BaseModel):
 
 class TokenResponse(BaseModel):
     access_token: str
+    # Optional for backward compatibility: clients from before the refresh
+    # flow shipped only ever read access_token. New logins always set it.
+    refresh_token: Optional[str] = None
     token_type: str = "bearer"
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
 
 
 class UserResponse(BaseModel):

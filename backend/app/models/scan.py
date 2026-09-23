@@ -59,6 +59,9 @@ class Scan(Base):
     # The UI reads this via the status-poll endpoint to tell the inspector what
     # went wrong instead of leaving a scan stuck in 'processing' forever.
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Version of the rule book this scan was evaluated against (rule_versions
+    # .version_code). Amendments must never silently rewrite past verdicts.
+    rule_version: Mapped[str | None] = mapped_column(String(100), nullable=True)
     model_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
     # Engine telemetry that does not gate the verdict: barcode cross-check
     # results, preprocessing notes. Nullable so pre-existing rows load fine.

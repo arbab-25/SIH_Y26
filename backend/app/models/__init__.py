@@ -11,10 +11,14 @@ from app.models.field_override import FieldOverride
 from app.models.report import Report
 from app.models.email_log import EmailLog
 from app.models.audit_log import AuditLog
+from app.models.refresh_token import RefreshToken
+from app.models.rule_version import RuleVersion
 
 __all__ = [
     "User",
     "Scan",
+    "RefreshToken",
+    "RuleVersion",
     "Product",
     "ExtractedField",
     "Violation",

@@ -11,6 +11,7 @@ import enum
 
 class UserRole(str, enum.Enum):
     INSPECTOR = "INSPECTOR"
+    SUPERVISOR = "SUPERVISOR"
     SENIOR_OFFICER = "SENIOR_OFFICER"
     ADMIN = "ADMIN"
 
@@ -49,3 +50,4 @@ class User(Base):
     reports = relationship("Report", back_populates="generated_by_user", lazy="dynamic")
     overrides = relationship("FieldOverride", back_populates="overridden_by_user", lazy="dynamic")
     audit_logs = relationship("AuditLog", back_populates="user", lazy="dynamic")
+    refresh_tokens = relationship("RefreshToken", back_populates="user", lazy="dynamic")

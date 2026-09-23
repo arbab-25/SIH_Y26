@@ -20,6 +20,7 @@ from app.models.scan import Scan, ScanStatus, Verdict
 from app.models.product import Product
 from app.models.extracted_field import ExtractedField
 from app.models.rule import Rule
+from app.models.rule_version import RuleVersion
 from app.models.violation import Violation, Severity
 from app.models.field_override import FieldOverride
 from app.api.deps import get_current_user
@@ -30,6 +31,7 @@ from app.services.field_extractors import (
     apply_barcode_crosscheck,
 )
 from app.services import redis_service
+from app.services.audit_service import record_audit, hash_input
 from app.services.rule_engine import evaluate_product_compliance
 from app.utils.image_utils import validate_magic_bytes, strip_exif_keep_orientation
 from app.utils.rate_limit import check_rate_limit
@@ -240,6 +242,12 @@ async def _process_scan(
             scan.status = ScanStatus.DONE
             scan.verdict = evaluation.verdict
             scan.compliance_score = evaluation.compliance_score
+            # Attribute the verdict to the rule-book version in force (Phase 3):
+            # amendments never silently rewrite past decisions.
+            rule_version_row = (await db.execute(
+                select(RuleVersion).where(RuleVersion.is_active == True)  # noqa: E712
+            )).scalar_one_or_none()
+            scan.rule_version = rule_version_row.version_code if rule_version_row else None
             if all_ocr_items:
                 word_confidences = [
                     item.confidence * 100 if item.confidence <= 1.0 else item.confidence
@@ -375,6 +383,14 @@ async def create_scan(
             
         saved_image_paths.append(target_path)
 
+    input_hash = hash_input({
+        "filenames": sorted(img.filename or "" for img in images),
+        "sizes": sorted(len(saved) for saved in saved_image_paths),
+        "category": category,
+        "package_type": package_type,
+        "is_imported": is_imported,
+    })
+
     # 3. Create Scan record (always owned by the signed-in inspector).
     # The heavy OCR/rule work runs as a background task: on the free deployment
     # tier the synchronous version exhausted the instance mid-request and the
@@ -418,6 +434,21 @@ async def create_scan(
         dispatch = "in-process"
     else:
         dispatch = "rq"
+
+    # Audit trail (Phase 3): who scanned, input fingerprint, outcome pending.
+    await record_audit(
+        db,
+        user_id=current_user.id,
+        action="scan.create",
+        entity="scan",
+        entity_id=scan_id,
+        meta={"input_hash": input_hash, "dispatch": dispatch, "category": category},
+        ip=request.client.host if request.client else None,
+    )
+    # Commit NOW, not at dependency teardown: dependency sessions close only
+    # after background tasks finish, and an open write transaction here locks
+    # SQLite (and slows Postgres) for the whole OCR duration.
+    await db.commit()
 
     return {
         "id": str(scan.id),
