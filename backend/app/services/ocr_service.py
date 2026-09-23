@@ -62,13 +62,31 @@ class _TesseractEngine:
 
     name = "tesseract"
 
+    def __init__(self):
+        # Tesseract language packs installed on the host (eng + hin cover the
+        # Phase-1 English + Hindi requirement; tesseract-ocr-hin ships in the
+        # Docker image). Configured per CALL so hosts missing a pack fall
+        # back at inference time rather than failing the engine probe.
+        self.langs = (getattr(settings, "OCR_LANGUAGES", "") or "eng+hin").strip()
+
     def __call__(self, image: np.ndarray):
         import pytesseract
 
         h, w = image.shape[:2]
-        data = pytesseract.image_to_data(
-            image, output_type=pytesseract.Output.DICT, config="--psm 6"
-        )
+        try:
+            data = pytesseract.image_to_data(
+                image,
+                output_type=pytesseract.Output.DICT,
+                config="--psm 6",
+                lang=self.langs,
+            )
+        except pytesseract.TesseractError:
+            # A configured language pack is missing on this host: retry with
+            # English only instead of failing the scan (Rule 7 of the brief —
+            # degrade, never guess).
+            data = pytesseract.image_to_data(
+                image, output_type=pytesseract.Output.DICT, config="--psm 6", lang="eng"
+            )
         results = []
         for i in range(len(data["text"])):
             text = (data["text"][i] or "").strip()

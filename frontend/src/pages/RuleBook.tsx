@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { Search, Bookmark } from 'lucide-react';
 import { api } from '../utils/api';
 import { RuleItem } from '../types';
@@ -12,77 +13,58 @@ interface RuleBookProps {
 export const RuleBook: React.FC<RuleBookProps> = ({ initialRule, lang }) => {
   const t = translations[lang];
   const [activeTab, setActiveTab] = useState<'rules' | 'schedules'>('rules');
-  const [rules, setRules] = useState<RuleItem[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedChapter, setSelectedChapter] = useState<string>('all');
   const [selectedRule, setSelectedRule] = useState<RuleItem | null>(null);
-  const [loading, setLoading] = useState(false);
 
   // Schedules state
   const [activeScheduleTab, setActiveScheduleTab] = useState<'second' | 'table1' | 'fifth'>('second');
-  const [scheduleData, setScheduleData] = useState<any>(null);
 
-  const fetchRules = useCallback(async (): Promise<{ items: RuleItem[]; selected: RuleItem | null }> => {
-    try {
+  // Phase 4: TanStack Query owns rules fetching (search/filter args are part
+  // of the query key, so every combination caches independently).
+  const {
+    data: rules = [],
+    isPending: loading,
+    error,
+  } = useQuery<RuleItem[]>({
+    queryKey: ['rules', searchQuery, selectedChapter],
+    queryFn: async () => {
       let url = '/rules';
       const params = new URLSearchParams();
       if (searchQuery) params.append('q', searchQuery);
       if (selectedChapter !== 'all') params.append('chapter', selectedChapter);
       if (params.toString()) url += `?${params.toString()}`;
-
       const res = await api.get(url);
-      const data: RuleItem[] = res.data || [];
-
-      let selected: RuleItem | null = null;
-      if (initialRule) {
-        selected =
-          data.find((r) => r.rule_number.toLowerCase() === initialRule.toLowerCase()) ?? null;
-      }
-      return { items: data, selected };
-    } catch (err) {
-      console.error('Failed to load rules:', err);
-      return { items: [], selected: null };
-    } finally {
-      setLoading(false);
-    }
-  }, [initialRule, searchQuery, selectedChapter]);
-
-  const fetchScheduleData = useCallback(
-    async (type: string): Promise<any> => {
-      try {
-        const res = await api.get(`/schedules/${type}`);
-        return res.data;
-      } catch (err) {
-        console.error('Failed to load schedule:', err);
-        return null;
-      }
+      return (res.data || []) as RuleItem[];
     },
-    []
-  );
+    placeholderData: keepPreviousData,
+    staleTime: 300_000, // statutory text rarely changes; the SW cache also holds it
+  });
 
-  // Initial/filter load: fetch then commit state together (no setState during the effect body).
-  useEffect(() => {
-    let cancelled = false;
-    void fetchRules().then(({ items, selected }) => {
-      if (cancelled) return;
-      setRules(items);
-      if (selected) setSelectedRule(selected);
-      else setSelectedRule((current) => (current && items.some((r) => r.id === current.id) ? current : items[0] ?? null));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [fetchRules]);
+  const { data: scheduleData } = useQuery<any>({
+    queryKey: ['schedule', activeScheduleTab],
+    queryFn: async () => {
+      const res = await api.get(`/schedules/${activeScheduleTab}`);
+      return res.data;
+    },
+    enabled: activeTab === 'schedules',
+    staleTime: 300_000,
+  });
 
-  useEffect(() => {
-    let cancelled = false;
-    void fetchScheduleData(activeScheduleTab).then((data) => {
-      if (!cancelled) setScheduleData(data);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeScheduleTab, fetchScheduleData]);
+  // Deep-link selection + default selection, derived during render (React
+  // Compiler-friendly): state that mirrors props/derived data is set during
+  // render with the adjust-state-on-prop-change pattern, not in an effect.
+  const [lastRulesKey, setLastRulesKey] = useState<string | null>(null);
+  const rulesKey = `${initialRule || ''}|${rules.map((r) => r.id).join(',')}`;
+  if (rulesKey !== lastRulesKey) {
+    setLastRulesKey(rulesKey);
+    if (!selectedRule || !rules.some((r) => r.id === selectedRule.id)) {
+      const match = initialRule
+        ? rules.find((r) => r.rule_number.toLowerCase() === initialRule.toLowerCase())
+        : undefined;
+      setSelectedRule(match || rules[0] || null);
+    }
+  }
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -149,7 +131,9 @@ export const RuleBook: React.FC<RuleBookProps> = ({ initialRule, lang }) => {
 
             {/* Rules List */}
             <div className="space-y-1.5 max-h-[580px] overflow-y-auto pr-1">
-              {loading ? (
+              {error ? (
+                <div className="text-center py-8 text-xs text-amber-900 bg-amber-50 rounded-xl">Rules could not be loaded. Check the connection and try again.</div>
+              ) : loading ? (
                 <div className="text-center py-8 text-xs text-slate-400">Loading statutory rules...</div>
               ) : rules.length === 0 ? (
                 <div className="text-center py-8 text-xs text-slate-400">No matching rules found.</div>

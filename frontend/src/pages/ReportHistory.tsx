@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { Download, ChevronLeft, ChevronRight } from 'lucide-react';
 import { api } from '../utils/api';
 import { ReportItem } from '../types';
@@ -10,38 +11,31 @@ interface ReportHistoryProps {
 
 export const ReportHistory: React.FC<ReportHistoryProps> = ({ lang }) => {
   const t = translations[lang];
-  const [reports, setReports] = useState<ReportItem[]>([]);
   const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
   const [verdictFilter, setVerdictFilter] = useState('');
-  const [loading, setLoading] = useState(false);
 
-  const fetchReports = useCallback(async (): Promise<{ items: ReportItem[]; pages: number }> => {
-    try {
+  // Phase 4: TanStack Query with server-side pagination; keepPreviousData
+  // holds the last page visible while the next one loads (no table flicker).
+  const {
+    data,
+    isPending: loading,
+    error,
+  } = useQuery<{ items: ReportItem[]; pages: number }>({
+    queryKey: ['reports', page, verdictFilter],
+    queryFn: async () => {
       let url = `/reports?page=${page}&size=10`;
       if (verdictFilter) url += `&verdict=${verdictFilter}`;
       const res = await api.get(url);
-      return { items: (res.data?.items || []) as ReportItem[], pages: (res.data?.pages || 1) as number };
-    } catch (err) {
-      console.error('Failed to load reports:', err);
-      return { items: [], pages: 1 };
-    } finally {
-      setLoading(false);
-    }
-  }, [page, verdictFilter]);
-
-  // Initial/filter load: fetch then commit state together (no setState during the effect body).
-  useEffect(() => {
-    let cancelled = false;
-    void fetchReports().then(({ items, pages }) => {
-      if (cancelled) return;
-      setReports(items);
-      setTotalPages(pages);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [fetchReports]);
+      return {
+        items: (res.data?.items || []) as ReportItem[],
+        pages: (res.data?.pages || 1) as number,
+      };
+    },
+    placeholderData: keepPreviousData,
+    staleTime: 15_000,
+  });
+  const reports = data?.items || [];
+  const totalPages = data?.pages || 1;
 
   const handleExportExcel = async () => {
     try {
@@ -150,7 +144,11 @@ export const ReportHistory: React.FC<ReportHistoryProps> = ({ lang }) => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {loading ? (
+              {error ? (
+                <tr>
+                  <td colSpan={8} className="p-8 text-center text-amber-900 bg-amber-50">Reports could not be loaded. Check the connection and try again.</td>
+                </tr>
+              ) : loading ? (
                 <tr>
                   <td colSpan={8} className="p-8 text-center text-slate-400">Loading compliance reports...</td>
                 </tr>

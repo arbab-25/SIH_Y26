@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     # Phase-1 accuracy pipeline (deskew + NL-means denoise + CLAHE + bounded
     # upscale) before OCR. Set false only for A/B benchmarking.
     OCR_ENHANCE: bool = True
+    # Tesseract language packs for OCR (English + Hindi per Phase 1). Falls
+    # back to English-only at inference time when a pack is missing on the host.
+    OCR_LANGUAGES: str = "eng+hin"
 
     # CORS – defaults include the deployed frontend so a missing env var can never lock out users
     CORS_ORIGINS: str = (

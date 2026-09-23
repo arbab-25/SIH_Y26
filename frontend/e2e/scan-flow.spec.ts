@@ -14,6 +14,7 @@ const EMAIL = process.env.E2E_TEST_EMAIL || '';
 const PASSWORD = process.env.E2E_TEST_PASSWORD || '';
 
 const needsAccount = test.skip(!EMAIL || !PASSWORD, 'E2E_TEST_EMAIL/E2E_TEST_PASSWORD not configured');
+void needsAccount;
 
 test.use({ baseURL: BASE_URL });
 
@@ -73,7 +74,7 @@ test.describe('scan journey', () => {
 });
 
 test.describe('report download journey', () => {
-  test('generate report and download its PDF', async ({ page, request }) => {
+  test('generate report and download its PDF', async ({ request }) => {
     test.skip(!EMAIL || !PASSWORD, 'account not configured');
 
     // Login via API for a token (faster than UI round-trip).

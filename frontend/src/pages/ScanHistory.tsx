@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Clock, Eye } from 'lucide-react';
 import { api } from '../utils/api';
 import { translations } from '../i18n/translations';
@@ -11,32 +12,21 @@ interface ScanHistoryProps {
 
 export const ScanHistory: React.FC<ScanHistoryProps> = ({ onSelectScan, lang }) => {
   const t = translations[lang];
-  const [scans, setScans] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
   const [rerunningId, setRerunningId] = useState<string | null>(null);
 
-  const fetchScans = useCallback(async (): Promise<any[]> => {
-    try {
+  // Phase 4: TanStack Query owns fetching, cache, loading and error states.
+  const {
+    data: scans = [],
+    isPending: loading,
+    error,
+  } = useQuery<any[]>({
+    queryKey: ['scans', 1, 20],
+    queryFn: async () => {
       const res = await api.get('/scans?page=1&size=20');
       return (res.data?.items || []) as any[];
-    } catch (err) {
-      console.error('Failed to load scans:', err);
-      return [];
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  // Initial load: fetch then commit state together (no setState during the effect body).
-  useEffect(() => {
-    let cancelled = false;
-    void fetchScans().then((items) => {
-      if (!cancelled) setScans(items);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [fetchScans]);
+    },
+    staleTime: 15_000,
+  });
 
   const handleRerun = async (id: string) => {
     setRerunningId(id);
@@ -62,7 +52,11 @@ export const ScanHistory: React.FC<ScanHistoryProps> = ({ onSelectScan, lang }) 
       </div>
 
       {/* Scans Grid */}
-      {loading ? (
+      {error ? (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 text-center text-amber-900 text-xs">
+          Scan history could not be loaded. Check the connection and try again.
+        </div>
+      ) : loading ? (
         <div className="text-center py-16 text-xs text-slate-400">Loading scan history...</div>
       ) : scans.length === 0 ? (
         <div className="bg-white rounded-2xl p-12 text-center border border-slate-200 text-slate-400 text-xs">

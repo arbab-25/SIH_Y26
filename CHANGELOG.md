@@ -72,6 +72,15 @@ Every phase has passing tests, its own commit, and no breaking API or DB changes
 - `render.yaml`: documents `REDIS_URL`, `S3_*` (R2), `SENTRY_DSN`, `DEMO_*` secrets, `RULE_VERSION_CODE`, `OCR_ENHANCE`; adds the `codemaze-worker` service; sets `no-cache` for `/sw.js`; comments document the free UptimeRobot ping to avoid cold starts.
 - 3 tests.
 
+### Phase 1 & 4 completion pass (`9b8e2c1`)
+
+**Added**
+- **Hindi OCR (completes the Phase-1 "English + Hindi" requirement):** the tesseract engine now requests `OCR_LANGUAGES` packs (`eng+hin` default; tesseract-ocr-hin ships in the Docker image) and degrades to English-only at inference time when a pack is missing on the host — never failing the scan. Devanagari OCR items flow through the deterministic extractors; a Hindi-only label yields no fabricated declarations and routes NEEDS_REVIEW (fail-closed). 5 tests.
+- **TanStack Query migration completed (completes the Phase-4 "all API calls" requirement):** ScanHistory, ReportHistory and RuleBook moved from manual `useEffect` fetches to `useQuery` with cache + loading + error states; ReportHistory uses server-side pagination via `keepPreviousData` (no table flicker between pages); RuleBook search/chapter/schedule queries cache per key with 5-minute staleTime (deep-link selection derived render-safe, React-Compiler friendly).
+
+**Changed**
+- Skipped-items list updated: Vitest unit tests remain future work; the TanStack and Hindi items are now done.
+
 ### Tooling added (all free / open source)
 
 | Tool | Role | Cost |
