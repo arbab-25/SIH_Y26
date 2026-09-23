@@ -146,3 +146,29 @@ range; miscalibration >10 points would require re-tuning `OCR_CONFIDENCE_THRESHO
 
 **Reporting rule.** No result enters this file or the README until the run has actually been
 executed; no placeholder numbers are invented anywhere in this document.
+
+---
+
+## 4. Phase-1 accuracy pipeline (implemented, seed benchmark available)
+
+The extraction pipeline now runs a dedicated enhancement stage before OCR:
+Hough-based deskew (angles beyond ±15° rejected as misdetection), NL-means
+denoise, CLAHE, and a bounded 1.5× upscale for small frames. In addition,
+pyzbar reads EAN/GTIN barcodes and QR codes; a machine-decoded barcode
+cross-checks the OCR'd GTIN (confirm, demote on mismatch, or fill at review
+confidence when OCR missed it) — deterministic input only, never a verdict.
+
+**Runnable benchmark.** A labeled seed sample set lives in
+`backend/tests/benchdata/` (synthetic, rendered text; one deliberately skewed
+sample). Run:
+
+```
+cd backend
+python scripts/benchmark_ocr.py
+```
+
+It prints per-field precision/recall (RapidFuzz ≥ 0.8 for text, exact for
+numerics) plus a macro average, and writes `tests/benchdata/latest_report.json`.
+The committed seed set is synthetic and measures the extraction pipeline only —
+NOT legal accuracy. Quotable numbers on real label photographs require the
+held-out protocol in §3 above; replace the seed set as real photos are collected.

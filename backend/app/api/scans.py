@@ -1,6 +1,7 @@
 """Scans API Router — Label Upload, OCR Extraction, Rule Validation, Overrides."""
 
 import os
+import re
 import uuid
 import time
 import asyncio
@@ -23,7 +24,11 @@ from app.models.violation import Violation, Severity
 from app.models.field_override import FieldOverride
 from app.api.deps import get_current_user
 from app.services.ocr_service import run_ocr
-from app.services.field_extractors import extract_fields_from_ocr, merge_extracted_fields
+from app.services.field_extractors import (
+    extract_fields_from_ocr,
+    merge_extracted_fields,
+    apply_barcode_crosscheck,
+)
 from app.services.rule_engine import evaluate_product_compliance
 from app.utils.image_utils import validate_magic_bytes, strip_exif_keep_orientation
 from app.utils.rate_limit import check_rate_limit
@@ -67,6 +72,7 @@ async def _process_scan(
             is_any_blurry = False
             blur_error_msg = None
             per_image_extractions = []
+            barcode_candidates = []
 
             for img_path in scan.image_urls or []:
                 try:
@@ -89,6 +95,9 @@ async def _process_scan(
                         return
                     all_ocr_items.extend(items)
                     combined_metadata = meta
+                    for bc in (meta.get("barcodes") or {}).get("results", []):
+                        if bc.get("data"):
+                            barcode_candidates.append(str(bc["data"]))
                     # Extract per photo: items from different photos share one
                     # coordinate space, and merging them before line rebuilding
                     # interleaved text across panels — a best-before value once
@@ -97,6 +106,27 @@ async def _process_scan(
                         per_image_extractions.append(extract_fields_from_ocr(items))
                 except Exception as e:
                     print(f"[WARN] OCR failed for {img_path}: {e}")
+
+            # Barcode cross-check (Rule 6(4A)(a)): a machine-decoded barcode is
+            # authoritative. See apply_barcode_crosscheck for the fail-closed
+            # confirm / mismatch / fill branches (§3).
+            barcode_meta_out = None
+            if barcode_candidates:
+                decoded = next(
+                    (c for c in barcode_candidates if re.fullmatch(r"\d{8,14}", c)),
+                    None,
+                )
+                if decoded:
+                    outcome = apply_barcode_crosscheck(extracted_data, decoded)
+                    barcode_meta_out = {"source": "pyzbar", **outcome}
+                    print(f"[INFO] Barcode cross-check: {outcome}")
+
+            if barcode_meta_out:
+                extracted_dict = extracted_data.to_dict()
+                scan.scan_meta = {
+                    **(scan.scan_meta or {}),
+                    "barcode": barcode_meta_out,
+                }
 
             if is_any_blurry and len(all_ocr_items) < 5:
                 scan.status = ScanStatus.FAILED

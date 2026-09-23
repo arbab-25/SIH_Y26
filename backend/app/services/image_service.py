@@ -2,14 +2,115 @@
 Features:
 - Blur detection (Laplacian variance)
 - CLAHE (Contrast Limited Adaptive Histogram Equalization)
-- Deskew & perspective correction
 - Denoise and contrast calculation
+- Hough-based deskew + perspective correction (Phase 1 accuracy pipeline)
+- Barcode/QR reading via pyzbar (Rule 6(4A)(a) cross-check)
 - Veg/Non-veg color dot detection (Rule 6(8))
 """
 
 import cv2
 import numpy as np
-from typing import Tuple, Optional, Dict, Any
+from typing import Tuple, Optional, Dict, Any, List
+
+
+def deskew_image(image: np.ndarray, max_angle: float = 15.0) -> Tuple[np.ndarray, float]:
+    """Straighten a skewed label photo using the dominant Hough line angle.
+
+    Phone photos of packages are rarely perfectly upright; up to ±15° of skew
+    measurably drops OCR recognition confidence on small print. The angle comes
+    from the median of the dominant Hough lines — robust to one misdetected
+    edge. Angles beyond max_angle are rejected as misdetection (a photo taken
+    at 90° is a different panel, not a skew). Returns (image, applied_angle).
+    """
+    if len(image.shape) == 3:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = image
+
+    # Blurry/low-texture photos return few lines; widen the Canny aperture so
+    # we still find the package edges.
+    edges = cv2.Canny(gray, 50, 150, apertureSize=3)
+    lines = cv2.HoughLinesP(
+        edges,
+        rho=1,
+        theta=np.pi / 180,
+        threshold=80,
+        minLineLength=min(gray.shape) // 4,
+        maxLineGap=15,
+    )
+    if lines is None or len(lines) == 0:
+        return image, 0.0
+
+    angles: List[float] = []
+    for line in lines[:100]:
+        # OpenCV 4.x returns shape (N,1,4); OpenCV 5.x returns (N,4). Flatten
+        # either shape so the unpack works on both.
+        coords = np.asarray(line).reshape(-1)
+        if coords.size < 4:
+            continue
+        x1, y1, x2, y2 = (float(c) for c in coords[:4])
+        if x2 - x1 == 0:
+            continue  # perfectly vertical: meaningless for deskew, skip
+        angle = float(np.degrees(np.arctan2(y2 - y1, x2 - x1)))
+        # Normalize to [-45, 45]: a line at 80° is a slightly-rotated vertical
+        # edge, not a heavy text skew.
+        while angle > 45:
+            angle -= 90
+        while angle < -45:
+            angle += 90
+        angles.append(angle)
+    if not angles:
+        return image, 0.0
+
+    median_angle = float(np.median(angles))
+    if abs(median_angle) < 0.3 or abs(median_angle) > max_angle:
+        return image, 0.0
+
+    h, w = gray.shape[:2]
+    center = (w // 2, h // 2)
+    m = cv2.getRotationMatrix2D(center, median_angle, 1.0)
+    # expand=True would bleed black borders that the OCR detector reads as
+    # text regions; keep the original size and lose only the corners.
+    rotated = cv2.warpAffine(
+        image, m, (w, h), flags=cv2.INTER_CUBIC,
+        borderMode=cv2.BORDER_CONSTANT, borderValue=(255, 255, 255),
+    )
+    return rotated, round(median_angle, 2)
+
+
+def enhance_for_ocr(image: np.ndarray) -> np.ndarray:
+    """Full Phase-1 enhancement pipeline: deskew, denoise, CLAHE, upscale.
+
+    Order matters — deskew first (denoising a skewed image wastes work and
+    interpolation blurs it further), then denoise, then CLAHE on the clean
+    result, then a bounded upscale so small statutory print gains pixels.
+    Returns the enhanced 3-channel BGR image (OCR engines expect color).
+    """
+    if image is None or image.size == 0:
+        return image
+
+    deskewed, _angle = deskew_image(image)
+
+    # Non-local-means is far stronger than a 3x3 Gaussian on JPEG/halftone
+    # noise, at a cost only on the CPU — fine at OCR_MAX_DIMENSION <= 1200.
+    denoised = cv2.fastNlMeansDenoisingColored(deskewed, None, h=6, hColor=6, templateWindowSize=7, searchWindowSize=15)
+
+    gray = cv2.cvtColor(denoised, cv2.COLOR_BGR2GRAY)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    enhanced = clahe.apply(gray)
+
+    # Bounded upscale: small labels (e.g. a 200 px-wide shampoo sachet) gain
+    # recognition from 1.5x; capping the long side at 1600 keeps inference
+    # memory bounded on the free tier.
+    h, w = enhanced.shape[:2]
+    if max(h, w) < 900:
+        scale = 1.5
+        enhanced = cv2.resize(enhanced, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_CUBIC)
+        if max(enhanced.shape[:2]) > 1600:
+            down = 1600.0 / max(enhanced.shape[:2])
+            enhanced = cv2.resize(enhanced, (int(enhanced.shape[1] * down), int(enhanced.shape[0] * down)), interpolation=cv2.INTER_AREA)
+
+    return cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
 
 
 def is_image_blurry(image: np.ndarray, threshold: float = 80.0) -> Tuple[bool, float]:
@@ -114,3 +215,88 @@ def detect_veg_nonveg_symbol(image: np.ndarray) -> Dict[str, Any]:
         return {"detected": True, "symbol": "NON_VEGETARIAN", "confidence": min(0.95, red_ratio * 500)}
 
     return {"detected": False, "symbol": None, "confidence": 0.0}
+
+
+def _decode_barcodes(gray: "np.ndarray") -> list:
+    """Decode 1D barcodes + QR codes with pyzbar; never raises.
+
+    pyzbar needs the libzbar shared library. On the Render Docker image it is
+    present (libzbar0 is installed in the Dockerfile). On a dev machine without
+    it, the deferred import plus try/except keeps scans working without the
+    barcode cross-check rather than failing the whole scan.
+    """
+    try:
+        from pyzbar import pyzbar as pyzbar_decoder
+    except Exception as exc:  # ImportError or missing libzbar native library
+        print(f"[WARN] pyzbar unavailable, barcode cross-check skipped: {exc}")
+        return []
+    try:
+        return pyzbar_decoder.decode(gray)
+    except Exception as exc:
+        print(f"[WARN] pyzbar decode failed: {exc}")
+        return []
+
+
+def _rect_to_list(rect) -> list | None:
+    """Convert a pyzbar Rect (named attrs) or sequence to a plain list."""
+    try:
+        return [int(rect.left), int(rect.top), int(rect.width), int(rect.height)]
+    except (AttributeError, TypeError, ValueError):
+        try:
+            return [int(v) for v in rect]
+        except (TypeError, ValueError):
+            return None
+
+
+def detect_barcodes(image: np.ndarray) -> Dict[str, Any]:
+    """Read EAN/GTIN barcodes and QR codes from a label photo.
+
+    Rule 6(4A)(a) permits a barcode/GTIN/QR on the package. The value is
+    machine-printed with an error-correcting symbology, so it is the most
+    trustworthy reading on the label (confidence 1.0): it is used downstream
+    to CROSS-CHECK the OCR'd GTIN digits, never to invent one (§3: a field the
+    camera can read but OCR missed must not be silently filled in).
+    """
+    if image is None or image.size == 0:
+        return {"detected": False, "results": []}
+
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
+    try:
+        raw = _decode_barcodes(gray)
+    except Exception as exc:
+        print(f"[WARN] pyzbar decode raised: {exc}")
+        raw = []
+
+    # Small/stretched codes often fail on the full frame but decode on an
+    # upscaled copy; try once more before giving up.
+    if not raw:
+        h, w = gray.shape[:2]
+        if max(h, w) < 1600:
+            scaled = cv2.resize(gray, (int(w * 1.5), int(h * 1.5)), interpolation=cv2.INTER_CUBIC)
+            try:
+                raw = _decode_barcodes(scaled)
+            except Exception:
+                raw = []
+
+    results = []
+    for r in raw:
+        try:
+            data = r.data.decode("utf-8", errors="replace").strip()
+        except Exception:
+            data = ""
+        if not data:
+            continue
+        results.append({
+            "type": str(r.type),
+            "data": data,
+            # Barcodes are machine-printed: a successful decode is exact.
+            "confidence": 1.0,
+            # pyzbar's rect is a 4-named-attr object, not a tuple — handle any
+            # rect-like shape defensively and never let bbox extraction break
+            # a successful decode.
+            "bbox": _rect_to_list(r.rect),
+        })
+
+    if not results:
+        return {"detected": False, "results": []}
+    return {"detected": True, "results": results}

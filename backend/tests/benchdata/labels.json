@@ -1,0 +1,55 @@
+{
+  "name": "codemaze-ocr-benchmark-v1",
+  "description": "Seed labeled sample set for the OCR field-extraction benchmark. Synthetic labels rendered by tests/benchdata/make_samples.py; extend with real label photographs by appending entries with the same shape. Ground truth is human-entered per EVALUATION.md protocol.",
+  "version": 1,
+  "samples": [
+    {
+      "image": "sample_01.png",
+      "description": "Biscuit pack: complete clean declarations",
+      "fields": {
+        "net_quantity": "100 g",
+        "mrp": "25.00",
+        "mfg_date": "01/2026",
+        "manufacturer_name": "ACME Foods Pvt Ltd",
+        "country_of_origin": null,
+        "fssai_number": "10012345678901"
+      }
+    },
+    {
+      "image": "sample_02.png",
+      "description": "Shampoo bottle back panel: MRP without inclusive-taxes phrase and best-before",
+      "fields": {
+        "net_quantity": "340 ml",
+        "mrp": "195",
+        "mfg_date": "03/2026",
+        "manufacturer_name": "Hindustan Consumer Care Ltd",
+        "country_of_origin": null,
+        "fssai_number": null
+      }
+    },
+    {
+      "image": "sample_03.png",
+      "description": "Imported chocolate: country of origin declared",
+      "fields": {
+        "net_quantity": "50 g",
+        "mrp": "99",
+        "mfg_date": "11/2025",
+        "manufacturer_name": null,
+        "country_of_origin": "Switzerland",
+        "fssai_number": "10012345678902"
+      }
+    },
+    {
+      "image": "sample_04.png",
+      "description": "Skewed label photo (approx 5 degrees roll)",
+      "fields": {
+        "net_quantity": "500 g",
+        "mrp": "75",
+        "mfg_date": "06/2026",
+        "manufacturer_name": "Bharat Snacks Ltd",
+        "country_of_origin": null,
+        "fssai_number": null
+      }
+    }
+  ]
+}

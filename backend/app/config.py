@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     # the platform restarts the service, orphaning in-flight scans. 1 thread
     # is slower per image but keeps the service responsive.
     OCR_THREADS: int = 1
+    # Phase-1 accuracy pipeline (deskew + NL-means denoise + CLAHE + bounded
+    # upscale) before OCR. Set false only for A/B benchmarking.
+    OCR_ENHANCE: bool = True
 
     # CORS – defaults include the deployed frontend so a missing env var can never lock out users
     CORS_ORIGINS: str = (

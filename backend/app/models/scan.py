@@ -60,6 +60,9 @@ class Scan(Base):
     # went wrong instead of leaving a scan stuck in 'processing' forever.
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     model_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # Engine telemetry that does not gate the verdict: barcode cross-check
+    # results, preprocessing notes. Nullable so pre-existing rows load fine.
+    scan_meta: Mapped[dict | None] = mapped_column(JSON_TYPE, nullable=True)
     geo_lat: Mapped[float | None] = mapped_column(Numeric(10, 7), nullable=True)
     geo_lng: Mapped[float | None] = mapped_column(Numeric(10, 7), nullable=True)
     device_info: Mapped[str | None] = mapped_column(Text, nullable=True)

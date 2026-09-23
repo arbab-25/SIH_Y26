@@ -745,3 +745,45 @@ def extract_fields_from_ocr(items: List[Any], full_text: Optional[str] = None) -
         data.set_field("barcode_gtin", gtin, item_gtin.confidence, item_gtin.bbox, item_gtin.text)
 
     return data
+
+
+# Machine-decoded barcode cross-check thresholds: a confirmed OCR read keeps
+# its confidence; a mismatch is demoted below OCR_CONFIDENCE_THRESHOLD so the
+# field routes to NEEDS_REVIEW instead of silently overriding either reading.
+BARCODE_MISMATCH_MAX_CONF = 0.50
+BARCODE_MISSING_READ_CONF = 0.60
+
+
+def apply_barcode_crosscheck(extracted: ExtractedData, decoded_gtin: str) -> dict:
+    """Cross-check the OCR'd GTIN against a pyzbar-decoded barcode (Rule 6(4A)(a)).
+
+    Deterministic and fail-closed (§3):
+    - OCR read == decoded digits -> read confirmed, untouched.
+    - OCR read a DIFFERENT 13/14-digit number -> confidence demoted below the
+      NEEDS_REVIEW threshold; the mismatch is recorded. Never auto-corrected:
+      the inspector decides which reading is right.
+    - OCR missed the digits entirely -> the machine read is stored at a
+      deliberately mid confidence (0.60) so the field stays in NEEDS_REVIEW
+      rather than passing as a confirmed declaration.
+    """
+    entry = extracted.fields.get("barcode_gtin")
+    if not isinstance(entry, dict):
+        entry = {"value": None, "confidence": 0.0, "bbox": None, "source_text": None}
+        extracted.fields["barcode_gtin"] = entry
+
+    ocr_value = str(entry.get("value") or "")
+    if ocr_value == decoded_gtin:
+        return {"outcome": "confirmed", "decoded_gtin": decoded_gtin}
+    if not ocr_value:
+        entry["value"] = decoded_gtin
+        entry["confidence"] = BARCODE_MISSING_READ_CONF
+        entry["source"] = "barcode_decode"
+        return {"outcome": "filled_from_barcode", "decoded_gtin": decoded_gtin}
+
+    entry["confidence"] = min(float(entry.get("confidence") or 0.0), BARCODE_MISMATCH_MAX_CONF)
+    entry["mismatch_with_barcode"] = decoded_gtin
+    return {
+        "outcome": "mismatch",
+        "decoded_gtin": decoded_gtin,
+        "ocr_gtin": ocr_value,
+    }

@@ -14,7 +14,12 @@ import numpy as np
 import cv2
 import os
 
-from app.services.image_service import is_image_blurry, preprocess_image_for_ocr
+from app.services.image_service import (
+    is_image_blurry,
+    preprocess_image_for_ocr,
+    enhance_for_ocr,
+    detect_barcodes,
+)
 from app.config import settings
 
 # Global in-memory engine cache per §5: "Cache OCR models in memory at startup, never per-request"
@@ -199,8 +204,19 @@ def run_ocr(
             "error_hi": "हम इस लेबल को स्पष्ट रूप से नहीं पढ़ सके। कृपया पास जाएं, फोन को स्थिर रखें और फिर से फोटो लें।"
         }
 
-    # Preprocess
-    enhanced = preprocess_image_for_ocr(image)
+    # Preprocess — Phase 1 accuracy pipeline (deskew + denoise + CLAHE + upscale)
+    # via enhance_for_ocr; OCR_ENHANCE=false reverts to the lighter legacy
+    # pipeline (A/B benchmarking only).
+    enhanced = enhance_for_ocr(image) if settings.OCR_ENHANCE else preprocess_image_for_ocr(image)
+
+    # Barcode/QR cross-check (Rule 6(4A)(a)): read machine-printed codes on the
+    # ORIGINAL (un-preprocessed) frame — binarization/upscale in the OCR
+    # pipeline can distort symbology edges. Deterministic input only.
+    try:
+        barcode_meta = detect_barcodes(image)
+    except Exception as bc_exc:
+        print(f"[WARN] Barcode detection failed: {bc_exc}")
+        barcode_meta = {"detected": False, "results": []}
 
     # Run OCR engine
     engine = get_ocr_engine()
@@ -214,15 +230,10 @@ def run_ocr(
         try:
             results = engine(enhanced)
         except Exception:
-            # Retry once on the raw image (preprocessing occasionally breaks
+            # Retry once on the raw image (full preprocessing occasionally breaks
             # detection on unusual crops).
             results = engine(image)
     except Exception as primary_error:
-        # Inference-level fallback: on the small deployment instance the ONNX
-        # runtime can fail mid-call (memory pressure), which used to fail the
-        # whole scan. Tesseract runs as a small external process, so it survives
-        # conditions that kill in-process ONNX inference. Metadata records the
-        # engine that actually produced the text.
         results = None
         if engine.name != "tesseract":
             try:
@@ -243,6 +254,20 @@ def run_ocr(
                 "the server. Please retry; if it keeps failing, try a smaller "
                 "or clearer photo."
             )
+
+    # Weaker read after the stronger pipeline? The aggressive enhancement
+    # (NL-means denoise, upscaling) can starve the text detector on unusual
+    # inputs — fewer than half the words the raw frame yields means the
+    # enhanced pass hurt. Re-run on the legacy light pipeline; deterministic,
+    # bounded to one extra inference only when it is clearly better.
+    if not ocr_runtime_error and results is not None and len(results) == 1:
+        try:
+            legacy = engine(preprocess_image_for_ocr(image))
+            if legacy is not None and len(legacy) > 2 * len(results):
+                print("[INFO] Enhanced-pipeline read underperformed; using legacy preprocessing output.")
+                results = legacy
+        except Exception:
+            pass
 
     if results:
         for entry in results:
@@ -277,6 +302,7 @@ def run_ocr(
         "blur_score": blur_score,
         "engine": used_engine_name,
         "total_words": len(items),
+        "barcodes": barcode_meta,
         **(({"error": ocr_runtime_error}) if ocr_runtime_error else {}),
         "avg_confidence": round(avg_conf, 2),
         "confidence_distribution": [
