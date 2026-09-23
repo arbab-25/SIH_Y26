@@ -1,7 +1,8 @@
 import React, { useState, useRef } from 'react';
-import { Camera, UploadCloud, AlertCircle, RefreshCw, Layers, CheckCircle2, X, ShieldCheck, LogIn } from 'lucide-react';
+import { Camera, UploadCloud, AlertCircle, RefreshCw, Layers, CheckCircle2, X, ShieldCheck, LogIn, Loader2 } from 'lucide-react';
 import { api } from '../utils/api';
 import { queueOfflineScan } from '../utils/offlineQueue';
+import { useScanJobStatus } from '../hooks/useScanJob';
 import { translations } from '../i18n/translations';
 import { ScanResult, User } from '../types';
 
@@ -36,6 +37,10 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+
+  // Phase 2/4: the async job this page is waiting on (drives the progress UI).
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const { data: jobStatus } = useScanJobStatus(activeJobId, loading);
   
   // Webcam states
   const [showWebcam, setShowWebcam] = useState(false);
@@ -250,6 +255,8 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({
       if (!scanId) {
         throw new Error('Scan was accepted but no scan id was returned.');
       }
+      // Surface the Phase-2 queue state (RQ job id when Redis is configured).
+      setActiveJobId(scanId);
 
       const POLL_INTERVAL_MS = 1500;
       const POLL_TIMEOUT_MS = 180000; // free-tier OCR can take a while on cold start
@@ -289,11 +296,13 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({
       }
 
       onScanComplete(details);
+      setActiveJobId(null);
     } catch (err: any) {
       const detail = err.response?.data?.detail;
       setErrorMessage(detail || 'We could not read this label clearly. Please move closer, hold steady, and retake the photo.');
     } finally {
       setLoading(false);
+      setActiveJobId(null);
     }
   };
 
@@ -421,10 +430,14 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+            <label
+              htmlFor="commodity-category"
+              className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5"
+            >
               {t.commodityCategory}
             </label>
             <select
+              id="commodity-category"
               value={category}
               onChange={(e) => setCategory(e.target.value)}
               className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:bg-white focus:border-[#0E7490] focus:ring-1 focus:ring-[#0E7490] outline-none min-h-[44px]"
@@ -439,10 +452,14 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+            <label
+              htmlFor="package-type"
+              className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5"
+            >
               {t.packageType}
             </label>
             <select
+              id="package-type"
               value={packageType}
               onChange={(e) => setPackageType(e.target.value)}
               className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:bg-white focus:border-[#0E7490] focus:ring-1 focus:ring-[#0E7490] outline-none min-h-[44px]"
@@ -461,6 +478,7 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({
           <div className="grid grid-cols-3 gap-3">
             <input
               type="number"
+              aria-label={t.pdpHeight}
               placeholder={t.pdpHeight}
               value={pdpHeight}
               onChange={(e) => setPdpHeight(e.target.value)}
@@ -468,6 +486,7 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({
             />
             <input
               type="number"
+              aria-label={t.pdpWidth}
               placeholder={t.pdpWidth}
               value={pdpWidth}
               onChange={(e) => setPdpWidth(e.target.value)}
@@ -475,6 +494,7 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({
             />
             <input
               type="number"
+              aria-label={t.glyphHeight}
               placeholder={t.glyphHeight}
               value={glyphHeight}
               onChange={(e) => setGlyphHeight(e.target.value)}
@@ -514,6 +534,21 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({
           <div className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4 text-center">
             {t.deterministicPipeline}
           </div>
+          {/* Phase 2/4: async job state from GET /scans/{id}/job */}
+          {jobStatus && !jobStatus.done && (
+            <div
+              role="status"
+              aria-live="polite"
+              className="flex items-center justify-center gap-2 mb-4 text-xs font-semibold text-slate-500"
+            >
+              <Loader2 size={14} className="animate-spin text-[#0E7490]" />
+              <span>
+                {lang === 'hi'
+                  ? `सर्वर स्थिति: ${jobStatus.job?.status || jobStatus.scan_status}`
+                  : `Server status: ${jobStatus.job?.status || jobStatus.scan_status}`}
+              </span>
+            </div>
+          )}
           <div className="grid grid-cols-4 gap-2">
             {[
               { num: 1, label: t.stepUploading },

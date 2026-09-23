@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
 import { BarChart2, TrendingUp, FileCheck, Layers, RefreshCw, DatabaseZap } from 'lucide-react';
 import { api } from '../utils/api';
@@ -9,39 +10,22 @@ interface DashboardProps {
   lang: 'en' | 'hi';
 }
 
+async function fetchDashboardStats(): Promise<DashboardStats> {
+  const res = await api.get('/dashboard/stats');
+  return res.data as DashboardStats;
+}
+
 export const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
   const t = translations[lang];
-  const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-
-  // Pure data fetch — no setState inside, so effects can call it safely.
-  const loadStats = useCallback(async (): Promise<{ data: DashboardStats | null; error: string | null }> => {
-    try {
-      const res = await api.get('/dashboard/stats');
-      return { data: res.data as DashboardStats, error: null };
-    } catch (err) {
-      console.error('Failed to load dashboard stats:', err);
-      return { data: null, error: 'Inspection analytics could not be loaded. Check the service connection and try again.' };
-    }
-  }, []);
-
-  const applyStats = useCallback((result: { data: DashboardStats | null; error: string | null }) => {
-    setStats(result.data);
-    setLoadError(result.error);
-    setLoading(false);
-  }, []);
-
-  // Initial load: fetch then commit state together (no setState during the effect body).
-  useEffect(() => {
-    let cancelled = false;
-    void loadStats().then((result) => {
-      if (!cancelled) applyStats(result);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [loadStats, applyStats]);
+  // Phase 4: TanStack Query owns loading/error/data + cache + refetch.
+  const { data: stats, isPending: loading, error, refetch } = useQuery<DashboardStats>({
+    queryKey: ['dashboard-stats'],
+    queryFn: fetchDashboardStats,
+    staleTime: 60_000,
+  });
+  const loadError = error
+    ? 'Inspection analytics could not be loaded. Check the service connection and try again.'
+    : null;
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -53,11 +37,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
           <p className="text-sm text-slate-600 mt-2">Inspection volumes, OCR quality, and rule trends from recorded scans.</p>
         </div>
         <button
-          onClick={() => {
-            setLoading(true);
-            setLoadError(null);
-            void loadStats().then((result) => applyStats(result));
-          }}
+          onClick={() => void refetch()}
           disabled={loading}
           className="btn-secondary shrink-0"
         >
