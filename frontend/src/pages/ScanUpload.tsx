@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Camera, UploadCloud, AlertCircle, RefreshCw, Layers, CheckCircle2, X, ShieldCheck, LogIn, Loader2 } from 'lucide-react';
+import { Camera, UploadCloud, AlertCircle, RefreshCw, Layers, CheckCircle2, X, ShieldCheck, LogIn, Loader2, ScanLine } from 'lucide-react';
 import { api } from '../utils/api';
 import { queueOfflineScan } from '../utils/offlineQueue';
 import { useScanJobStatus } from '../hooks/useScanJob';
@@ -41,6 +41,20 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({
   // Phase 2/4: the async job this page is waiting on (drives the progress UI).
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const { data: jobStatus } = useScanJobStatus(activeJobId, loading);
+
+  // Real progress ticker: eases toward 92% while the request/polling runs and
+  // pipeline steps light up from actual progress — no fixed timeouts claiming
+  // "done" before the server has answered. Cancels on unmount.
+  const [scanProgress, setScanProgress] = useState<number>(0);
+  const progressTimerRef = useRef<number | null>(null);
+  const progressRef = useRef<number>(0);
+  const stopProgressTimer = () => {
+    if (progressTimerRef.current !== null) {
+      window.clearInterval(progressTimerRef.current);
+      progressTimerRef.current = null;
+    }
+  };
+  React.useEffect(() => stopProgressTimer, []);
   
   // Webcam states
   const [showWebcam, setShowWebcam] = useState(false);
@@ -239,9 +253,20 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({
     if (glyphHeight) formData.append('measured_glyph_height_mm', glyphHeight);
 
     try {
-      // Step 2: Enhancing & Reading Text
-      setTimeout(() => setActiveStep(2), 600);
-      setTimeout(() => setActiveStep(3), 1200);
+      // Real progress: ease toward 92% while the job runs; steps light up from
+      // the true progress curve instead of fixed timeouts.
+      stopProgressTimer();
+      progressRef.current = 6;
+      progressTimerRef.current = window.setInterval(() => {
+        progressRef.current = Math.min(
+          92,
+          progressRef.current + Math.max(0.4, (92 - progressRef.current) * 0.035)
+        );
+        setScanProgress(progressRef.current);
+        setActiveStep(
+          progressRef.current >= 85 ? 4 : progressRef.current >= 55 ? 3 : progressRef.current >= 25 ? 2 : 1
+        );
+      }, 150);
 
       // The backend accepts the upload immediately (202) and processes the OCR
       // + rule pipeline in the background — on the free deployment tier a
@@ -281,6 +306,8 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({
         }
       }
 
+      stopProgressTimer();
+      setScanProgress(96);
       setActiveStep(4); // Done
 
       if (finalStatus === 'failed') {
@@ -291,17 +318,28 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({
         return;
       }
       if (finalStatus !== 'done' || !details) {
-        setErrorMessage('The scan is taking longer than expected. Check Scan History in a moment — it will appear there once processing completes.');
+        // The job outlived this tab's polling window — it still finishes on the
+        // server and ScanHistory auto-refreshes. This screen offers recovery
+        // actions instead of an alarming notice.
+        setErrorMessage(
+          lang === 'hi'
+            ? 'स्कैन अभी सर्वर पर पूरा हो रहा है — यह Scan History में कुछ ही सेकंड में दिख जाएगा (पेज अपने आप अपडेट होता रहता है)।'
+            : 'This scan is still finishing on the server — it will appear in Scan History within a few seconds (that page refreshes itself).'
+        );
         return;
       }
 
+      setScanProgress(100);
       onScanComplete(details);
       setActiveJobId(null);
     } catch (err: any) {
       const detail = err.response?.data?.detail;
       setErrorMessage(detail || 'We could not read this label clearly. Please move closer, hold steady, and retake the photo.');
     } finally {
+      stopProgressTimer();
       setLoading(false);
+      setActiveStep(0);
+      setScanProgress(0);
       setActiveJobId(null);
     }
   };
@@ -528,12 +566,23 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({
         </button>
       </div>
 
-      {/* Live Progress Steps per §7.1 */}
+      {/* Live Scanning Animation per §7.1 — beam sweep over the captured panel,
+          pipeline steps driven by real request progress (never "fake done"). */}
       {loading && (
         <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm animate-fade-in">
-          <div className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4 text-center">
+          <style>{`
+            @keyframes cmScanBeam { 0% { top: -18%; } 50% { top: 100%; } 100% { top: -18%; } }
+            @keyframes cmScanGlow { 0%,100% { box-shadow: 0 0 0 0 rgba(14,116,144,.28); } 50% { box-shadow: 0 0 0 10px rgba(14,116,144,0); } }
+            @keyframes cmSweep { 0% { transform: translateX(-100%);} 100% { transform: translateX(400%);} }
+            @media (prefers-reduced-motion: reduce) {
+              .cm-beam, .cm-frame, .cm-shimmer { animation: none !important; }
+            }
+          `}</style>
+          <div className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4 text-center flex items-center justify-center gap-2">
+            <ScanLine size={15} className="text-[#0E7490]" />
             {t.deterministicPipeline}
           </div>
+
           {/* Phase 2/4: async job state from GET /scans/{id}/job */}
           {jobStatus && !jobStatus.done && (
             <div
@@ -549,27 +598,87 @@ export const ScanUpload: React.FC<ScanUploadProps> = ({
               </span>
             </div>
           )}
-          <div className="grid grid-cols-4 gap-2">
-            {[
-              { num: 1, label: t.stepUploading },
-              { num: 2, label: t.stepEnhancing },
-              { num: 3, label: t.stepOcr },
-              { num: 4, label: t.stepRules },
-            ].map((st) => (
+
+          <div className="flex flex-col sm:flex-row items-center gap-6">
+            {/* Scanner frame: live preview of the first captured panel with a
+                sweeping light beam, corner brackets and a pulsing frame. */}
+            <div
+              className="cm-frame relative w-40 h-52 sm:w-44 sm:h-56 shrink-0 rounded-xl overflow-hidden bg-slate-100 border-2 border-[#0E7490]/60"
+              style={{ animation: 'cmScanGlow 2s ease-in-out infinite' }}
+            >
+              {previewUrls[0] ? (
+                <img src={previewUrls[0]} alt="Panel under analysis" className="w-full h-full object-cover" />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center text-slate-400">
+                  <ScanLine size={40} />
+                </div>
+              )}
               <div
-                key={st.num}
-                className={`p-3 rounded-xl border text-center transition-all ${
-                  activeStep === st.num
-                    ? 'bg-cyan-50 border-[#0E7490] text-[#0E7490] font-bold shadow-xs'
-                    : activeStep > st.num
-                    ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
-                    : 'bg-slate-50 border-slate-200 text-slate-400'
-                }`}
-              >
-                <div className="text-xs font-bold">{t.stepNum} {st.num}</div>
-                <div className="text-[11px] truncate mt-0.5">{st.label}</div>
+                className="cm-beam absolute left-0 right-0 h-[18%] pointer-events-none"
+                style={{
+                  animation: 'cmScanBeam 2.1s ease-in-out infinite',
+                  background: 'linear-gradient(to bottom, rgba(34,211,238,0), rgba(34,211,238,.22) 55%, rgba(34,211,238,.65) 96%, rgba(255,255,255,.85))',
+                  borderBottom: '2px solid #22D3EE',
+                  filter: 'drop-shadow(0 0 8px rgba(34,211,238,.7))',
+                }}
+              />
+              {/* corner brackets */}
+              <div className="absolute top-1.5 left-1.5 w-5 h-5 border-t-2 border-l-2 border-[#0E7490] rounded-tl"></div>
+              <div className="absolute top-1.5 right-1.5 w-5 h-5 border-t-2 border-r-2 border-[#0E7490] rounded-tr"></div>
+              <div className="absolute bottom-1.5 left-1.5 w-5 h-5 border-b-2 border-l-2 border-[#0E7490] rounded-bl"></div>
+              <div className="absolute bottom-1.5 right-1.5 w-5 h-5 border-b-2 border-r-2 border-[#0E7490] rounded-br"></div>
+              <div className="absolute bottom-0 inset-x-0 bg-[#12355B]/85 text-white text-[10px] font-bold text-center py-1 tracking-wide">
+                {Math.round(scanProgress)}% · {t.stepNum} {activeStep || 1}/4
               </div>
-            ))}
+            </div>
+
+            {/* Steps + progress bar */}
+            <div className="flex-1 w-full">
+              <div className="h-2.5 w-full bg-slate-100 rounded-full overflow-hidden mb-4">
+                <div
+                  className="h-full rounded-full relative"
+                  style={{
+                    width: `${scanProgress}%`,
+                    background: 'linear-gradient(90deg,#12355B,#0E7490)',
+                    transition: 'width .25s ease-out',
+                  }}
+                >
+                  <div
+                    className="cm-shimmer absolute inset-y-0 w-1/3 opacity-40"
+                    style={{
+                      background: 'linear-gradient(90deg, transparent, #fff, transparent)',
+                      animation: 'cmSweep 1.2s linear infinite',
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { num: 1, label: t.stepUploading },
+                  { num: 2, label: t.stepEnhancing },
+                  { num: 3, label: t.stepOcr },
+                  { num: 4, label: t.stepRules },
+                ].map((st) => (
+                  <div
+                    key={st.num}
+                    className={`p-2.5 rounded-xl border text-center transition-all ${
+                      activeStep === st.num
+                        ? 'bg-cyan-50 border-[#0E7490] text-[#0E7490] font-bold shadow-xs'
+                        : activeStep > st.num
+                        ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                        : 'bg-slate-50 border-slate-200 text-slate-400'
+                    }`}
+                  >
+                    <div className="text-[11px] font-bold flex items-center justify-center gap-1.5">
+                      {activeStep > st.num && <CheckCircle2 size={12} className="text-emerald-600" />}
+                      {t.stepNum} {st.num}
+                    </div>
+                    <div className="text-[11px] truncate mt-0.5">{st.label}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       )}

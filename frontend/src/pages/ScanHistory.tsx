@@ -26,6 +26,15 @@ export const ScanHistory: React.FC<ScanHistoryProps> = ({ onSelectScan, lang }) 
       return (res.data?.items || []) as any[];
     },
     staleTime: 15_000,
+    // While any scan is still processing (async 202 + background job), poll
+    // every 5s so finished scans appear on their own — no manual refresh.
+    refetchInterval: (query) => {
+      const items = (query.state.data as any[]) || [];
+      const anyPending = items.some((s: any) => s.processing_time_ms == null);
+      return anyPending ? 5_000 : false;
+    },
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
   });
 
   const handleRerun = async (id: string) => {
@@ -44,11 +53,13 @@ export const ScanHistory: React.FC<ScanHistoryProps> = ({ onSelectScan, lang }) 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       {/* Header */}
-      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
-        <h1 className="text-xl font-bold text-[#12355B]">{t.scanHistoryTitle}</h1>
-        <p className="text-xs text-slate-500 mt-1">
-          Complete log of label processing attempts, OCR latency, confidence scores, and re-evaluation actions per §7.7
-        </p>
+      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-bold text-[#12355B]">{t.scanHistoryTitle}</h1>
+          <p className="text-xs text-slate-500 mt-1">
+            Complete log of label processing attempts, OCR latency, confidence scores, and re-evaluation actions per §7.7
+          </p>
+        </div>
       </div>
 
       {/* Scans Grid */}

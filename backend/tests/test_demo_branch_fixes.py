@@ -28,6 +28,21 @@ from app.services.barcode_service import (
 )
 from app.services.field_extractors import ExtractedData
 from app.services.image_service import OCR_MAX_DIM, preprocess_image_for_ocr
+
+
+def _fssai(**overrides):
+    """Call run_fssai_checks with this branch's veg_nonveg_result contract."""
+    from app.rule_checkers.fssai_checks import run_fssai_checks
+    kwargs = dict(
+        category="food",
+        fssai_number="10015043001129",
+        ingredients_declared=True,
+        nutritional_info_declared=True,
+        veg_nonveg_symbol=None,
+        confidence=0.9,
+    )
+    kwargs.update(overrides)
+    return run_fssai_checks(**kwargs)
 from app.services.rule_engine import evaluate_product_compliance
 
 SEED_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "seed", "rules.json")
@@ -102,14 +117,7 @@ def test_rule_24_checker_individual_fields():
 
 def test_fssai_uses_detected_veg_symbol(monkeypatch):
     monkeypatch.setattr(fssai_module, "is_fssai_pdf_available", lambda: True)
-    results = fssai_module.run_fssai_checks(
-        category="food",
-        fssai_number="10015043001129",
-        ingredients_declared=True,
-        nutritional_info_declared=True,
-        veg_nonveg_symbol="VEGETARIAN",
-        confidence=0.9,
-    )
+    results = _fssai(veg_nonveg_symbol="VEGETARIAN")
     veg = [r for r in results if r.field == "veg_nonveg_symbol"]
     assert len(veg) == 1
     assert veg[0].status == Verdict.COMPLIANT
@@ -118,15 +126,8 @@ def test_fssai_uses_detected_veg_symbol(monkeypatch):
 
 def test_fssai_missing_symbol_is_review_not_silent(monkeypatch):
     monkeypatch.setattr(fssai_module, "is_fssai_pdf_available", lambda: True)
-    results = fssai_module.run_fssai_checks(
-        category="food",
-        fssai_number="10015043001129",
-        ingredients_declared=True,
-        nutritional_info_declared=True,
-        veg_nonveg_symbol=None,
-        confidence=0.9,
-        veg_analysis_ran=True,  # dot analysis ran but found no symbol on this panel
-    )
+    # Dot analysis ran but found no symbol on this panel.
+    results = _fssai(veg_nonveg_result={"detected": False, "symbol": None, "confidence": 0.0})
     veg = [r for r in results if r.field == "veg_nonveg_symbol"]
     assert len(veg) == 1
     assert veg[0].status == Verdict.NEEDS_REVIEW
@@ -136,44 +137,34 @@ def test_fssai_skips_symbol_when_analysis_never_ran(monkeypatch):
     """A mocked/single-panel scan without dot analysis must not gain a
     phantom veg-symbol review result — matching the pipeline contract."""
     monkeypatch.setattr(fssai_module, "is_fssai_pdf_available", lambda: True)
-    results = fssai_module.run_fssai_checks(
-        category="food",
-        fssai_number="10015043001129",
-        ingredients_declared=True,
-        nutritional_info_declared=True,
-        veg_nonveg_symbol=None,
-        confidence=0.9,
-        veg_analysis_ran=False,
-    )
+    results = _fssai(veg_nonveg_result=None)
     assert [r for r in results if r.field == "veg_nonveg_symbol"] == []
 
 
 def test_engine_flows_symbol_into_fssai_block():
-    extracted = {
-        "fssai_number": {"value": "10015043001129", "confidence": 0.9, "bbox": None},
-        "ingredients_declared": {"value": True, "confidence": 0.9, "bbox": None},
-        "nutritional_info_declared": {"value": True, "confidence": 0.9, "bbox": None},
-        "veg_nonveg_symbol": {"value": "NON_VEGETARIAN", "confidence": 0.8, "bbox": None},
-    }
     evaluation = evaluate_product_compliance(
-        extracted_data=extracted,
+        extracted_data={
+            "fssai_number": {"value": "10015043001129", "confidence": 0.9, "bbox": None},
+            "ingredients_declared": {"value": True, "confidence": 0.9, "bbox": None},
+            "nutritional_info_declared": {"value": True, "confidence": 0.9, "bbox": None},
+        },
         category="food",
         package_type="retail",
+        veg_nonveg_result={"detected": True, "symbol": "NON_VEGETARIAN", "confidence": 0.8},
     )
     veg = [r for r in evaluation.results if r.field == "veg_nonveg_symbol"]
     assert veg and veg[0].extracted_value == "NON_VEGETARIAN"
 
 
 def test_engine_skips_veg_check_when_analysis_never_ran():
-    """No veg_nonveg_symbol key in extracted data -> the check must not run,
-    so legacy/mocked fixtures keep their historical verdicts."""
-    extracted = {
-        "fssai_number": {"value": "10015043001129", "confidence": 0.9, "bbox": None},
-        "ingredients_declared": {"value": True, "confidence": 0.9, "bbox": None},
-        "nutritional_info_declared": {"value": True, "confidence": 0.9, "bbox": None},
-    }
+    """No veg_nonveg_result passed -> the check must not run, so legacy/mocked
+    fixtures keep their historical verdicts."""
     evaluation = evaluate_product_compliance(
-        extracted_data=extracted,
+        extracted_data={
+            "fssai_number": {"value": "10015043001129", "confidence": 0.9, "bbox": None},
+            "ingredients_declared": {"value": True, "confidence": 0.9, "bbox": None},
+            "nutritional_info_declared": {"value": True, "confidence": 0.9, "bbox": None},
+        },
         category="food",
         package_type="retail",
     )

@@ -149,8 +149,26 @@ def is_image_blurry(image: np.ndarray, threshold: float = 80.0) -> Tuple[bool, f
     return variance < threshold, variance
 
 
+# OCR input ceiling. PP-OCR detection cost grows ~quadratically with input
+# size; phone photos at 4000px dominate scan latency. 1600px on the long edge
+# keeps statutory small print legible (the frontend uploads at the same cap)
+# while cutting engine time on large photos by several x.
+OCR_MAX_DIM = 1600
+
+
 def preprocess_image_for_ocr(image: np.ndarray) -> np.ndarray:
-    """Enhance image for OCR: grayscale, denoise, CLAHE, and deskew."""
+    """Enhance image for OCR: downscale, grayscale, denoise, CLAHE, and deskew."""
+    # Bounded downscale: keep aspect, cap the long edge at OCR_MAX_DIM.
+    h, w = image.shape[:2]
+    long_edge = max(h, w)
+    if long_edge > OCR_MAX_DIM:
+        scale = OCR_MAX_DIM / float(long_edge)
+        image = cv2.resize(
+            image,
+            (max(1, round(int(w * scale))), max(1, round(int(h * scale)))),
+            interpolation=cv2.INTER_AREA,
+        )
+
     # Convert to grayscale
     if len(image.shape) == 3:
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
