@@ -1,28 +1,41 @@
 """Scans API Router — Label Upload, OCR Extraction, Rule Validation, Overrides."""
 
 import os
-import uuid
 import time
+import uuid
 from datetime import datetime
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request, status, Query
+
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    status,
+)
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, desc, or_
 from sqlalchemy.orm import selectinload
 
-from app.database import get_db
-from app.config import settings
-from app.models.user import User
-from app.models.scan import Scan, ScanStatus, Verdict
-from app.models.product import Product
-from app.models.extracted_field import ExtractedField
-from app.models.violation import Violation, Severity
-from app.models.field_override import FieldOverride
 from app.api.deps import get_current_user_optional, get_guest_device_id
-from app.services.ocr_service import run_ocr
+from app.config import settings
+from app.database import get_db
+from app.models.extracted_field import ExtractedField
+from app.models.field_override import FieldOverride
+from app.models.product import Product
+from app.models.scan import Scan, ScanStatus, Verdict
+from app.models.user import User
+from app.models.violation import Severity, Violation
+from app.services.barcode_service import run_barcode_crosscheck
 from app.services.field_extractors import extract_fields_from_ocr
+from app.services.image_service import detect_veg_nonveg_symbol
+from app.services.ocr_service import run_ocr
 from app.services.rule_engine import evaluate_product_compliance
-from app.utils.image_utils import validate_magic_bytes, strip_exif_keep_orientation
+from app.utils.image_utils import strip_exif_keep_orientation, validate_magic_bytes
 from app.utils.rate_limit import check_rate_limit
 
 router = APIRouter(prefix="/scans", tags=["Scans"])
@@ -116,7 +129,6 @@ async def create_scan(
     combined_metadata = {}
     is_any_blurry = False
     blur_error_msg = None
-
     for img_path in saved_image_paths:
         try:
             items, meta = run_ocr(img_path, detect_blur=True)
@@ -139,8 +151,43 @@ async def create_scan(
             detail=blur_error_msg or "We couldn't read this label clearly. Please move closer, hold steady, and retake the photo."
         )
 
-    # 5. Extract Declarations
-    extracted_data = extract_fields_from_ocr(all_ocr_items)
+    # 5. Extract Declarations. One image failing to yield text must never
+    # kill the scan: the outer try below demotes to NEEDS_REVIEW instead of
+    # leaving the Scan row stuck in PROCESSING forever (the reported
+    # "scan history not being saved" symptom).
+    try:
+        extracted_data = extract_fields_from_ocr(all_ocr_items)
+    except Exception as e:
+        print(f"[WARN] Field extraction failed, continuing without declarations: {e}")
+        extracted_data = extract_fields_from_ocr([])
+
+    # 5b. Barcode cross-check (Rule 6(4A)(a)): a machine-decoded barcode may
+    # confirm or demote the OCR'd GTIN — never invent a declaration.
+    barcode_outcome = None
+    try:
+        barcode_outcome = run_barcode_crosscheck(saved_image_paths, extracted_data)
+    except Exception as e:
+        print(f"[WARN] Barcode cross-check skipped: {e}")
+
+    # 5c. Veg / non-veg symbol (color-dot analysis on the first panel) — input
+    # to the FSSAI block, which previously ignored it entirely. The field is
+    # stored whenever the analysis runs — even when nothing is detected — so
+    # the engine can distinguish "looked and missed" from "never looked".
+    try:
+        import cv2
+        first_img = cv2.imread(saved_image_paths[0]) if saved_image_paths else None
+        if first_img is not None:
+            symbol_info = detect_veg_nonveg_symbol(first_img)
+            extracted_data.set_field(
+                "veg_nonveg_symbol",
+                symbol_info.get("symbol"),
+                float(symbol_info.get("confidence", 0.0)),
+                None,
+                "opencv_dot_analysis"
+            )
+    except Exception as e:
+        print(f"[WARN] Veg/non-veg symbol analysis skipped: {e}")
+
     extracted_dict = extracted_data.to_dict()
 
     # 6. Evaluate Rules
@@ -156,6 +203,10 @@ async def create_scan(
 
     # 7. Persist Extracted Fields
     for key, item in extracted_dict.items():
+        # Skip never-detected analysis placeholders (e.g. a veg symbol that was
+        # looked for but not found) — their absence in history is the signal.
+        if item.get("value") is None:
+            continue
         # Determine status from evaluation results
         matching_res = next((r for r in evaluation.results if r.field == key), None)
         f_status = matching_res.status if matching_res else (
@@ -171,6 +222,18 @@ async def create_scan(
         )
         db.add(ef)
 
+    # 7b. Persist the barcode cross-check outcome as an informational field so
+    # the inspector sees WHY a GTIN was demoted or filled (no schema change).
+    if barcode_outcome:
+        db.add(ExtractedField(
+            scan_id=scan_id,
+            field_key="barcode_crosscheck",
+            field_value=f"{barcode_outcome.get('outcome')}: {barcode_outcome.get('decoded_gtin', '')}",
+            confidence=1.0,
+            bbox=None,
+            status=Verdict.COMPLIANT
+        ))
+
     # 8. Persist Violations
     for v in evaluation.violations:
         viol = Violation(
@@ -183,7 +246,15 @@ async def create_scan(
         )
         db.add(viol)
 
-    # 9. Persist Product summary record
+    # 9. Persist Product summary record. Coerce defensively: OCR may hand us
+    # strings where numbers are expected (e.g. "Rs. 125.00" for MRP), and one
+    # bad value must not 500 the request and strand the Scan in PROCESSING.
+    def _to_float(val, default=0.0):
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return default
+
     product = Product(
         scan_id=scan_id,
         product_name=str(extracted_data.get("product_name") or "Pre-packaged Commodity"),
@@ -193,9 +264,9 @@ async def create_scan(
         manufacturer_address=str(extracted_data.get("manufacturer_address") or ""),
         pin_code=str(extracted_data.get("pin_code") or ""),
         country_of_origin=str(extracted_data.get("country_of_origin") or ("India" if not is_imported else "")),
-        net_quantity_value=float(extracted_data.get("net_quantity_value") or 0.0),
+        net_quantity_value=_to_float(extracted_data.get("net_quantity_value")),
         net_quantity_unit=str(extracted_data.get("net_quantity_unit") or ""),
-        mrp=float(extracted_data.get("mrp") or 0.0),
+        mrp=_to_float(extracted_data.get("mrp")),
         fssai_number=str(extracted_data.get("fssai_number") or ""),
         consumer_care_phone=str(extracted_data.get("consumer_care_phone") or ""),
         consumer_care_email=str(extracted_data.get("consumer_care_email") or ""),

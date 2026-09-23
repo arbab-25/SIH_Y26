@@ -8,24 +8,25 @@ Strict Fail-Closed Architecture:
 - Penalty reference displayed per Rule 32 & 32A ('for reference only, not a legal determination')
 """
 
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
+
 from app.models.scan import Verdict
 from app.rule_checkers.base import CheckResult
+from app.rule_checkers.fssai_checks import run_fssai_checks
 from app.rule_checkers.rule_3_applicability import check_rule_3_applicability
-from app.rule_checkers.rule_26_exemptions import check_rule_26_exemptions
+from app.rule_checkers.rule_5_pack_sizes import check_second_schedule_pack_size
 from app.rule_checkers.rule_6_declarations import (
-    check_manufacturer_details,
+    check_consumer_care_details,
     check_country_of_origin,
-    check_mrp_declaration,
+    check_manufacturer_details,
     check_mfg_date_declaration,
-    check_consumer_care_details
+    check_mrp_declaration,
 )
+from app.rule_checkers.rule_7_letter_height import check_letter_height_and_pdp_area
 from app.rule_checkers.rule_12_quantity import check_vague_quantity_words
 from app.rule_checkers.rule_13_si_units import check_si_units
-from app.rule_checkers.rule_5_pack_sizes import check_second_schedule_pack_size
-from app.rule_checkers.rule_7_letter_height import check_letter_height_and_pdp_area
-from app.rule_checkers.fssai_checks import run_fssai_checks
-from app.config import settings
+from app.rule_checkers.rule_24_wholesale import check_wholesale_declarations
+from app.rule_checkers.rule_26_exemptions import check_rule_26_exemptions
 
 
 class RuleEngineEvaluation:
@@ -45,6 +46,42 @@ class RuleEngineEvaluation:
             "penalty_notice": self.penalty_notice,
             "disclaimer": "Verify against the physical package before issuing any notice."
         }
+
+
+def _finalize_evaluation(evaluation: RuleEngineEvaluation, results: List[CheckResult]) -> RuleEngineEvaluation:
+    """Aggregate checker results into verdict, score, violations, penalty notice.
+
+    Shared by the retail and the wholesale (Rule 24) paths so both compute
+    the overall outcome identically.
+    """
+    evaluation.results = results
+    violations = [r for r in results if r.status == Verdict.NON_COMPLIANT]
+    needs_review = [r for r in results if r.status == Verdict.NEEDS_REVIEW]
+    compliant = [r for r in results if r.status == Verdict.COMPLIANT]
+
+    evaluation.violations = violations
+
+    # Overall Verdict: any violation -> NON_COMPLIANT, else any review -> NEEDS_REVIEW.
+    if violations:
+        evaluation.verdict = Verdict.NON_COMPLIANT
+    elif needs_review:
+        evaluation.verdict = Verdict.NEEDS_REVIEW
+    else:
+        evaluation.verdict = Verdict.COMPLIANT
+
+    # Compliance score = compliant / applicable checks %
+    evaluation.compliance_score = (len(compliant) / max(1, len(results))) * 100.0
+
+    # Penalty Context (Display-only per Rule 32 & 32A)
+    if violations:
+        evaluation.penalty_notice = {
+            "statute": "Legal Metrology Act, 2009 & Rule 32",
+            "fine_range": "₹4,000 for rules 27 & 28; ₹5,000 for other contraventions (subsequent offences: up to ₹25,000 or 1 year imprisonment)",
+            "compounding": "Eligible for compounding under Rule 32A / Section 48",
+            "disclaimer": "Statutory penalty references displayed for administrative guidance only, not a judicial determination."
+        }
+
+    return evaluation
 
 
 def evaluate_product_compliance(
@@ -103,6 +140,25 @@ def evaluate_product_compliance(
     mfg_conf = extracted_data.get("manufacturer_name", {}).get("confidence", 0.0)
     mfg_bbox = extracted_data.get("manufacturer_name", {}).get("bbox")
 
+    # -----------------------------------------------------------------
+    # STEP 2.0: WHOLESALE packages are governed by Rule 24, not the retail
+    # Rule 6 declarations. Running retail checks on a wholesale package
+    # produced wrong citations (Rule 24 was never evaluated).
+    # -----------------------------------------------------------------
+    prod_name = extracted_data.get("product_name", {}).get("value") or category or ""
+
+    if (package_type or "retail").lower() == "wholesale":
+        r24 = check_wholesale_declarations(
+            manufacturer_name=mfg_name,
+            manufacturer_address=mfg_addr,
+            product_name=prod_name,
+            net_quantity_value=net_qty_val,
+            net_quantity_unit=net_qty_unit,
+            confidence=mfg_conf,
+        )
+        results.extend(r24)
+        return _finalize_evaluation(evaluation, results)
+
     r_mfg = check_manufacturer_details(
         name=mfg_name,
         address=mfg_addr,
@@ -144,7 +200,6 @@ def evaluate_product_compliance(
     results.append(r_vague)
 
     # 2.5 Standard Pack Sizes under Second Schedule (Rule 5)
-    prod_name = extracted_data.get("product_name", {}).get("value") or category or ""
     r_pack = check_second_schedule_pack_size(
         commodity_or_product_name=prod_name,
         net_quantity_value=net_qty_val,
@@ -211,48 +266,23 @@ def evaluate_product_compliance(
     fssai_conf = extracted_data.get("fssai_number", {}).get("confidence", 0.0)
     has_ing = extracted_data.get("ingredients_declared", {}).get("value", False)
     has_nut = extracted_data.get("nutritional_info_declared", {}).get("value", False)
+    veg_symbol = extracted_data.get("veg_nonveg_symbol", {}).get("value")
+    # The pipeline stores this field whenever OpenCV dot analysis actually ran
+    # (value None when no symbol was found); its absence means we never looked.
+    veg_analysis_ran = "veg_nonveg_symbol" in extracted_data
 
     fssai_results = run_fssai_checks(
         category=category or prod_name,
         fssai_number=fssai_num,
         ingredients_declared=has_ing,
         nutritional_info_declared=has_nut,
-        veg_nonveg_symbol=None,
-        confidence=fssai_conf
+        veg_nonveg_symbol=veg_symbol,
+        confidence=fssai_conf,
+        veg_analysis_ran=veg_analysis_ran
     )
     results.extend(fssai_results)
 
     # -----------------------------------------------------------------
     # STEP 4: Compute Overall Verdict & Compliance Score
     # -----------------------------------------------------------------
-    evaluation.results = results
-    violations = [r for r in results if r.status == Verdict.NON_COMPLIANT]
-    needs_review = [r for r in results if r.status == Verdict.NEEDS_REVIEW]
-    compliant = [r for r in results if r.status == Verdict.COMPLIANT]
-
-    evaluation.violations = violations
-
-    # Overall Verdict
-    if len(violations) > 0:
-        evaluation.verdict = Verdict.NON_COMPLIANT
-    elif len(needs_review) > 0:
-        evaluation.verdict = Verdict.NEEDS_REVIEW
-    else:
-        evaluation.verdict = Verdict.COMPLIANT
-
-    # Compliance score = compliant / applicable fields %
-    total_applicable = len(results)
-    evaluation.compliance_score = (len(compliant) / max(1, total_applicable)) * 100.0
-
-    # -----------------------------------------------------------------
-    # STEP 5: Penalty Context (Display-only per Rule 32 & 32A)
-    # -----------------------------------------------------------------
-    if len(violations) > 0:
-        evaluation.penalty_notice = {
-            "statute": "Legal Metrology Act, 2009 & Rule 32",
-            "fine_range": "₹4,000 for rules 27 & 28; ₹5,000 for other contraventions (subsequent offences: up to ₹25,000 or 1 year imprisonment)",
-            "compounding": "Eligible for compounding under Rule 32A / Section 48",
-            "disclaimer": "Statutory penalty references displayed for administrative guidance only, not a judicial determination."
-        }
-
-    return evaluation
+    return _finalize_evaluation(evaluation, results)

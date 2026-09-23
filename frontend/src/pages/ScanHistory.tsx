@@ -12,20 +12,41 @@ interface ScanHistoryProps {
 export const ScanHistory: React.FC<ScanHistoryProps> = ({ onSelectScan, lang }) => {
   const t = translations[lang];
   const [scans, setScans] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [rerunningId, setRerunningId] = useState<string | null>(null);
+  const [autoRefresh, setAutoRefresh] = useState(false);
 
   useEffect(() => {
     fetchScans();
   }, []);
 
+  // While any scan is still processing (server answers 202 + background
+  // worker), poll every 5s so finished scans appear here on their own —
+  // no manual "check again later" step. Stops as soon as all are terminal.
+  useEffect(() => {
+    if (!autoRefresh) return;
+    const id = window.setInterval(fetchScans, 5000);
+    return () => window.clearInterval(id);
+  }, [autoRefresh]);
+
+  // Refetch when the tab regains focus — cheap staleness guard.
+  useEffect(() => {
+    const onFocus = () => fetchScans();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, []);
+
   const fetchScans = async () => {
-    setLoading(true);
     try {
       const res = await api.get('/scans?page=1&size=20');
-      setScans(res.data?.items || []);
+      const items = res.data?.items || [];
+      setScans(items);
+      // A scan still in flight reports no processing time yet.
+      const anyPending = items.some((s: any) => s.processing_time_ms == null);
+      setAutoRefresh(anyPending);
     } catch (err) {
       console.error('Failed to load scans:', err);
+      setAutoRefresh(false);
     } finally {
       setLoading(false);
     }
@@ -46,11 +67,21 @@ export const ScanHistory: React.FC<ScanHistoryProps> = ({ onSelectScan, lang }) 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       {/* Header */}
-      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
-        <h1 className="text-xl font-bold text-[#12355B]">{t.scanHistoryTitle}</h1>
-        <p className="text-xs text-slate-500 mt-1">
-          Complete log of label processing attempts, OCR latency, confidence scores, and re-evaluation actions per §7.7
-        </p>
+      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-bold text-[#12355B]">{t.scanHistoryTitle}</h1>
+          <p className="text-xs text-slate-500 mt-1">
+            Complete log of label processing attempts, OCR latency, confidence scores, and re-evaluation actions per §7.7
+          </p>
+        </div>
+        <button
+          onClick={fetchScans}
+          className="flex items-center gap-2 px-3.5 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 transition-colors shrink-0 self-start sm:self-auto min-h-[40px]"
+          aria-label="Refresh scan history"
+        >
+          <RefreshCw size={14} className={autoRefresh ? 'animate-spin text-[#0E7490]' : ''} />
+          <span>{autoRefresh ? 'Live — updating…' : 'Refresh'}</span>
+        </button>
       </div>
 
       {/* Scans Grid */}

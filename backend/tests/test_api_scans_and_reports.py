@@ -2,6 +2,7 @@
 
 import pytest
 import io
+import uuid
 from PIL import Image, ImageDraw
 from httpx import AsyncClient, ASGITransport
 from app.main import app
@@ -35,7 +36,10 @@ async def test_full_scan_report_workflow():
             "package_type": "retail"
         }
         headers = {
-            "X-Guest-Device-Id": "test-device-uuid-12345"
+            # Unique per run: the suite runs against the shared dev DB, and a
+            # fixed device ID accumulates guest scans until the 3-scan guest
+            # cap turns every repeat run into 403 Forbidden.
+            "X-Guest-Device-Id": f"test-device-{uuid.uuid4()}"
         }
 
         scan_resp = await ac.post("/api/v1/scans", files=files, data=data, headers=headers)
