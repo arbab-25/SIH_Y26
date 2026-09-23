@@ -26,6 +26,7 @@ from app.rule_checkers.rule_12_quantity import check_vague_quantity_words
 from app.rule_checkers.rule_13_si_units import check_si_units
 from app.rule_checkers.rule_5_pack_sizes import check_second_schedule_pack_size
 from app.rule_checkers.rule_7_letter_height import check_letter_height_and_pdp_area
+from app.rule_checkers.rule_24_wholesale import check_wholesale_declarations
 from app.rule_checkers.fssai_checks import run_fssai_checks
 from app.config import settings
 
@@ -49,6 +50,45 @@ class RuleEngineEvaluation:
         }
 
 
+def _finalize(evaluation: "RuleEngineEvaluation", results: List[CheckResult]) -> None:
+    """Shared verdict/score/penalty computation (STEP 4 & 5 of the evaluation).
+
+    Informational entries (e.g. \"FSSAI checks unavailable\", measured-contrast
+    note, barcode-presence note) are displayed but must NOT gate the verdict or
+    the score — skipping or noting a check is not a finding.
+    """
+    informational_refs = {
+        "fssai-notice",          # fssai.pdf not attached: no FSSAI checks ran
+        "rule-9-1-b-contrast",   # measured contrast is advisory, not enforced
+        "rule-6-4A-a",           # barcode presence note (cross-check result)
+    }
+    scoping_results = [r for r in results if r.rule_ref not in informational_refs]
+    violations = [r for r in scoping_results if r.status == Verdict.NON_COMPLIANT]
+    needs_review = [r for r in scoping_results if r.status == Verdict.NEEDS_REVIEW]
+    compliant = [r for r in scoping_results if r.status == Verdict.COMPLIANT]
+
+    evaluation.results = results
+    evaluation.violations = violations
+
+    if len(violations) > 0:
+        evaluation.verdict = Verdict.NON_COMPLIANT
+    elif len(needs_review) > 0:
+        evaluation.verdict = Verdict.NEEDS_REVIEW
+    else:
+        evaluation.verdict = Verdict.COMPLIANT
+
+    total_applicable = len(scoping_results)
+    evaluation.compliance_score = (len(compliant) / max(1, total_applicable)) * 100.0
+
+    if len(violations) > 0:
+        evaluation.penalty_notice = {
+            "statute": "Legal Metrology Act, 2009 & Rule 32",
+            "fine_range": "₹4,000 for rules 27 & 28; ₹5,000 for other contraventions (subsequent offences: up to ₹25,000 or 1 year imprisonment)",
+            "compounding": "Eligible for compounding under Rule 32A / Section 48",
+            "disclaimer": "Statutory penalty references displayed for administrative guidance only, not a judicial determination."
+        }
+
+
 def evaluate_product_compliance(
     extracted_data: Dict[str, Any],
     category: Optional[str] = None,
@@ -58,11 +98,31 @@ def evaluate_product_compliance(
     is_fast_food: bool = False,
     pdp_height_cm: Optional[float] = None,
     pdp_width_cm: Optional[float] = None,
-    measured_glyph_height_mm: Optional[float] = None
+    measured_glyph_height_mm: Optional[float] = None,
+    veg_nonveg_result: Optional[Dict[str, Any]] = None,
+    measured_contrast: Optional[float] = None,
+    decoded_gtin: Optional[str] = None,
 ) -> RuleEngineEvaluation:
     """Execute complete deterministic Legal Metrology compliance evaluation."""
     evaluation = RuleEngineEvaluation()
     results: List[CheckResult] = []
+
+    # -----------------------------------------------------------------
+    # STEP 0: WHOLESALE packages follow Rule 24, not the retail Rule 6 set
+    # -----------------------------------------------------------------
+    # The retail checks below (MRP format, best-before, consumer care, …) do
+    # not apply to a wholesale package; running them produced bogus findings.
+    if (package_type or "retail").lower() == "wholesale":
+        results.extend(check_wholesale_declarations(
+            manufacturer_name=extracted_data.get("manufacturer_name", {}).get("value"),
+            manufacturer_address=extracted_data.get("manufacturer_address", {}).get("value"),
+            product_name=extracted_data.get("product_name", {}).get("value"),
+            net_quantity_value=extracted_data.get("net_quantity_value", {}).get("value"),
+            net_quantity_unit=extracted_data.get("net_quantity_unit", {}).get("value"),
+            confidence=extracted_data.get("manufacturer_name", {}).get("confidence", 0.0),
+        ))
+        _finalize(evaluation, results)
+        return evaluation
 
     net_qty_val = extracted_data.get("net_quantity_value", {}).get("value")
     net_qty_unit = extracted_data.get("net_quantity_unit", {}).get("value")
@@ -245,52 +305,58 @@ def evaluate_product_compliance(
     has_ing = extracted_data.get("ingredients_declared", {}).get("value", False)
     has_nut = extracted_data.get("nutritional_info_declared", {}).get("value", False)
 
+    # veg/non-veg analysis result flows from run_ocr metadata: {"detected",
+    # "symbol", "confidence"}. None means the analysis never ran.
     fssai_results = run_fssai_checks(
         category=category or prod_name,
         fssai_number=fssai_num,
         ingredients_declared=has_ing,
         nutritional_info_declared=has_nut,
-        veg_nonveg_symbol=None,
+        veg_nonveg_symbol=(veg_nonveg_result or {}).get("symbol"),
         confidence=fssai_conf
     )
     results.extend(fssai_results)
 
     # -----------------------------------------------------------------
+    # STEP 3b: Advisory measurements (display-only, never gate the verdict)
+    # -----------------------------------------------------------------
+    if measured_contrast is not None:
+        results.append(CheckResult(
+            field="label_contrast",
+            status=Verdict.NEEDS_REVIEW,  # informational; excluded from scoring
+            confidence=1.0,
+            rule_ref="rule-9-1-b-contrast",
+            message_en=(
+                f"Measured label contrast (RMS): {measured_contrast:.2f} — advisory measurement under Rule 9(1)(b); "
+                "verify readability on the physical package."
+            ),
+            message_hi=(
+                f"मापा गया लेबल कंट्रास्ट (RMS): {measured_contrast:.2f} — नियम 9(1)(ब) के अंतर्गत सलाहकारी माप; "
+                "भौतिक पैकेज पर पठनीयता जांचें।"
+            ),
+            quoted_rule_text="Rule 9(1)(b): declarations shall be prominent, legible and contrast with the background.",
+            severity="MINOR"
+        ))
+
+    if decoded_gtin:
+        results.append(CheckResult(
+            field="barcode_gtin",
+            status=Verdict.COMPLIANT,  # informational; excluded from scoring
+            confidence=1.0,
+            rule_ref="rule-6-4A-a",
+            message_en=(
+                f"Machine-decoded barcode/GTIN read: {decoded_gtin} — used to cross-check the OCR'd declaration."
+            ),
+            message_hi=(
+                f"मशीन-डिकोडेड बारकोड/GTIN पढ़ा गया: {decoded_gtin} — OCR घोषणा की क्रॉस-जांच के लिए उपयोग किया गया।"
+            ),
+            severity="MINOR",
+            extracted_value=str(decoded_gtin)
+        ))
+
+    # -----------------------------------------------------------------
     # STEP 4: Compute Overall Verdict & Compliance Score
     # -----------------------------------------------------------------
-    evaluation.results = results
-    # Informational entries (e.g. "FSSAI checks unavailable" when fssai.pdf is
-    # not attached) are displayed but must NOT gate the verdict or the score —
-    # skipping a check is not a finding.
-    informational_refs = {"fssai-notice"}
-    scoping_results = [r for r in results if r.rule_ref not in informational_refs]
-    violations = [r for r in scoping_results if r.status == Verdict.NON_COMPLIANT]
-    needs_review = [r for r in scoping_results if r.status == Verdict.NEEDS_REVIEW]
-    compliant = [r for r in scoping_results if r.status == Verdict.COMPLIANT]
-
-    evaluation.violations = violations
-
-    # Overall Verdict
-    if len(violations) > 0:
-        evaluation.verdict = Verdict.NON_COMPLIANT
-    elif len(needs_review) > 0:
-        evaluation.verdict = Verdict.NEEDS_REVIEW
-    else:
-        evaluation.verdict = Verdict.COMPLIANT
-
-    # Compliance score = compliant / applicable fields % (informational entries excluded)
-    total_applicable = len(scoping_results)
-    evaluation.compliance_score = (len(compliant) / max(1, total_applicable)) * 100.0
-
-    # -----------------------------------------------------------------
-    # STEP 5: Penalty Context (Display-only per Rule 32 & 32A)
-    # -----------------------------------------------------------------
-    if len(violations) > 0:
-        evaluation.penalty_notice = {
-            "statute": "Legal Metrology Act, 2009 & Rule 32",
-            "fine_range": "₹4,000 for rules 27 & 28; ₹5,000 for other contraventions (subsequent offences: up to ₹25,000 or 1 year imprisonment)",
-            "compounding": "Eligible for compounding under Rule 32A / Section 48",
-            "disclaimer": "Statutory penalty references displayed for administrative guidance only, not a judicial determination."
-        }
+    _finalize(evaluation, results)
 
     return evaluation

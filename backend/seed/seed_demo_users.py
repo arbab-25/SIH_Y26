@@ -36,6 +36,15 @@ def _required_env(name: str) -> str:
     return value
 
 
+def _load_dotenv() -> None:
+    """Honor backend/.env the same way the application config does."""
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
+    except ImportError:
+        pass
+
+
 async def seed_users(session) -> dict:
     """Create the demo accounts named by env vars. Returns {role: email}."""
     created = {}
@@ -106,6 +115,7 @@ async def seed_rule_version(session) -> str:
 
 
 async def main() -> None:
+    _load_dotenv()
     print("--- Seeding demo accounts + rule version (env-driven) ---")
     async with async_session_factory() as session:
         created = await seed_users(session)

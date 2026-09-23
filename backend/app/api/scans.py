@@ -76,6 +76,9 @@ async def _process_scan(
             blur_error_msg = None
             per_image_extractions = []
             barcode_candidates = []
+            veg_symbol = None
+            measured_contrast = None
+            decoded_gtin = None
 
             for img_path in scan.image_urls or []:
                 try:
@@ -101,6 +104,10 @@ async def _process_scan(
                     for bc in (meta.get("barcodes") or {}).get("results", []):
                         if bc.get("data"):
                             barcode_candidates.append(str(bc["data"]))
+                    if (meta.get("veg_nonveg") or {}).get("symbol"):
+                        veg_symbol = meta["veg_nonveg"]
+                    if meta.get("contrast") is not None:
+                        measured_contrast = meta["contrast"]
                     # Extract per photo: items from different photos share one
                     # coordinate space, and merging them before line rebuilding
                     # interleaved text across panels — a best-before value once
@@ -109,6 +116,28 @@ async def _process_scan(
                         per_image_extractions.append(extract_fields_from_ocr(items))
                 except Exception as e:
                     print(f"[WARN] OCR failed for {img_path}: {e}")
+
+            # Fail fast on unreadable input BEFORE any rule work: a blurry frame
+            # plus <5 surviving words cannot produce trustworthy fields.
+            if is_any_blurry and len(all_ocr_items) < 5:
+                scan.status = ScanStatus.FAILED
+                scan.verdict = Verdict.NEEDS_REVIEW
+                scan.error_message = blur_error_msg or (
+                    "We couldn't read this label clearly. Please move closer, "
+                    "hold steady, and retake the photo."
+                )
+                scan.processing_time_ms = int((time.time() - start_time) * 1000)
+                await db.commit()
+                return
+
+            # Merge per-photo extractions BEFORE the barcode cross-check: the
+            # cross-check mutates the merged ExtractedData (confirm / demote /
+            # fill branches), so it must see the final field set. Bug fix: this
+            # block previously ran before merge_extracted_fields and referenced
+            # an unbound name — every scan whose photo carried a decodable
+            # barcode crashed in the background task and was silently marked
+            # FAILED, which is why scan history appeared to stop saving.
+            extracted_data = merge_extracted_fields(per_image_extractions)
 
             # Barcode cross-check (Rule 6(4A)(a)): a machine-decoded barcode is
             # authoritative. See apply_barcode_crosscheck for the fail-closed
@@ -125,24 +154,11 @@ async def _process_scan(
                     print(f"[INFO] Barcode cross-check: {outcome}")
 
             if barcode_meta_out:
-                extracted_dict = extracted_data.to_dict()
                 scan.scan_meta = {
                     **(scan.scan_meta or {}),
                     "barcode": barcode_meta_out,
                 }
-
-            if is_any_blurry and len(all_ocr_items) < 5:
-                scan.status = ScanStatus.FAILED
-                scan.verdict = Verdict.NEEDS_REVIEW
-                scan.error_message = blur_error_msg or (
-                    "We couldn't read this label clearly. Please move closer, "
-                    "hold steady, and retake the photo."
-                )
-                scan.processing_time_ms = int((time.time() - start_time) * 1000)
-                await db.commit()
-                return
-
-            extracted_data = merge_extracted_fields(per_image_extractions)
+                decoded_gtin = decoded
             extracted_dict = extracted_data.to_dict()
 
             evaluation = evaluate_product_compliance(
@@ -153,7 +169,20 @@ async def _process_scan(
                 pdp_height_cm=pdp_height_cm,
                 pdp_width_cm=pdp_width_cm,
                 measured_glyph_height_mm=measured_glyph_height_mm,
+                veg_nonveg_result=veg_symbol,
+                measured_contrast=measured_contrast,
+                decoded_gtin=decoded_gtin,
             )
+
+            # Advisory results (contrast note, barcode presence, FSSAI
+            # availability) never gate the verdict, so they would otherwise be
+            # invisible — persist them in scan_meta for the detail view.
+            advisories = [
+                r.to_dict() for r in evaluation.results
+                if r.rule_ref in ("fssai-notice", "rule-9-1-b-contrast", "rule-6-4A-a")
+            ]
+            if advisories:
+                scan.scan_meta = {**(scan.scan_meta or {}), "advisories": advisories}
 
             ENGINE_FIELD_ALIASES = {
                 "manufacturer_name": "manufacturer",

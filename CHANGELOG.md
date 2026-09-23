@@ -2,6 +2,20 @@
 
 All notable changes to CODE MAZE. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.0.1] — 2026-09-24 — Reliability & completeness fixes (scan pipeline, rule book, engine coverage, OCR speed)
+
+Reported: scans not saving, rule book missing rules, engine not checking all rules, OCR slow, image scan quality poor. Root causes found and fixed:
+
+### Fixed
+- **Scans silently failing (history never saved):** the barcode cross-check block in `_process_scan` ran BEFORE `merge_extracted_fields` and referenced an unbound `extracted_data` — every scan whose photo contained a decodable barcode crashed in the background task and the generic exception handler marked it FAILED. The cross-check now runs on the merged extraction; blur fail-fast moved before any rule work. Regression-tested.
+- **Rule book incomplete:** `seed/parse_rulebook.py` shipped a hand-curated list of 28 rules (and pointed at a developer's `d:\ARBAB\...` PDF path). It now mechanically detects every main rule heading (1–34, incl. 32A, with 31 omitted by amendment) in the repo's `RULE_BOOK.pdf` and slices verbatim body text, merging with curated granular entries: **28 → 55 seed entries**. A guard fails the build if any main rule goes missing. Local DB reseeded.
+- **Rule-engine coverage:** wholesale packages now run **Rule 24** checks (manufacturer/address, commodity identity, total quantity) instead of retail-only checks; the **veg/non-veg symbol** parameter (previously accepted and ignored) now evaluates from OpenCV dot analysis; **label contrast** (Rule 9(1)(b)) and **decoded barcode** are surfaced as display-only advisory results that never gate the verdict. Advisories persist in `scans.scan_meta`.
+- **OCR latency:** `enhance_for_ocr` used `cv2.fastNlMeansDenoisingColored` — measured the largest preprocessing cost by far (tens of seconds on large frames). Replaced with grayscale bilateral filtering (edge-preserving, orders of magnitude cheaper here); deskew's Canny+Hough search now runs on a downscaled copy; the "weak read" retry only fires when the enhanced pass actually underperformed. Preprocessing: multi-second → ~10 ms on a 1200 px sample.
+- **Seed accounts missing:** `seed_db.py` / `seed_demo_users.py` read only process env, so `DEMO_*` vars set in `backend/.env` were ignored and no accounts were created. Both now load `backend/.env` via python-dotenv (env vars still take precedence).
+
+### Verified
+- 192 backend tests passing (15 new regression tests), frontend build green, benchmark macro P/R unchanged (1.000/0.958 on the synthetic seed), preprocessing timing measured before/after.
+
 ## [2.0.0] — 2026-09-23 — Phased upgrade (branch `improvement/phased-upgrades`)
 
 Five phases of accuracy, performance, security, frontend and DevOps work.

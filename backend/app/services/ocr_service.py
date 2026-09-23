@@ -19,6 +19,8 @@ from app.services.image_service import (
     preprocess_image_for_ocr,
     enhance_for_ocr,
     detect_barcodes,
+    detect_veg_nonveg_symbol,
+    calculate_contrast_ratio,
 )
 from app.config import settings
 
@@ -274,14 +276,20 @@ def run_ocr(
             )
 
     # Weaker read after the stronger pipeline? The aggressive enhancement
-    # (NL-means denoise, upscaling) can starve the text detector on unusual
-    # inputs — fewer than half the words the raw frame yields means the
-    # enhanced pass hurt. Re-run on the legacy light pipeline; deterministic,
-    # bounded to one extra inference only when it is clearly better.
-    if not ocr_runtime_error and results is not None and len(results) == 1:
+    # (denoise, upscaling) can starve the text detector on unusual inputs —
+    # far fewer words than the raw frame yields means the enhanced pass hurt.
+    # Re-run on the legacy light pipeline; deterministic, bounded to one extra
+    # inference ONLY when the enhanced pass actually underperformed (a healthy
+    # read never pays for this branch).
+    if (
+        not ocr_runtime_error
+        and results is not None
+        and len(items) == 0
+        and len(results) <= 1
+    ):
         try:
             legacy = engine(preprocess_image_for_ocr(image))
-            if legacy is not None and len(legacy) > 2 * len(results):
+            if legacy is not None and len(legacy) > 2 * max(1, len(results)):
                 print("[INFO] Enhanced-pipeline read underperformed; using legacy preprocessing output.")
                 results = legacy
         except Exception:
@@ -315,12 +323,29 @@ def run_ocr(
 
     avg_conf = (total_conf / len(items)) if items else 0.0
 
+    # Advisory measurements on the ORIGINAL frame (deterministic inputs for
+    # display-only rule results): veg/non-veg dot analysis (FSSAI) and label
+    # contrast (Rule 9(1)(b)). Cheap relative to inference; kept on the raw
+    # frame so preprocessing cannot fabricate or erase the measurement.
+    try:
+        veg_symbol = detect_veg_nonveg_symbol(image)
+    except Exception as veg_exc:
+        print(f"[WARN] Veg/non-veg analysis failed: {veg_exc}")
+        veg_symbol = {"detected": False, "symbol": None, "confidence": 0.0}
+    try:
+        contrast = calculate_contrast_ratio(image)
+    except Exception as c_exc:
+        print(f"[WARN] Contrast measurement failed: {c_exc}")
+        contrast = None
+
     metadata = {
         "blurry": False,
         "blur_score": blur_score,
         "engine": used_engine_name,
         "total_words": len(items),
         "barcodes": barcode_meta,
+        "veg_nonveg": veg_symbol,
+        **(({"contrast": contrast}) if contrast is not None else {}),
         **(({"error": ocr_runtime_error}) if ocr_runtime_error else {}),
         "avg_confidence": round(avg_conf, 2),
         "confidence_distribution": [

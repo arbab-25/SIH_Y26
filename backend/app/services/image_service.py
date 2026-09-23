@@ -21,21 +21,35 @@ def deskew_image(image: np.ndarray, max_angle: float = 15.0) -> Tuple[np.ndarray
     from the median of the dominant Hough lines — robust to one misdetected
     edge. Angles beyond max_angle are rejected as misdetection (a photo taken
     at 90° is a different panel, not a skew). Returns (image, applied_angle).
+
+    Performance: the Hough search runs on a downscaled copy (angles are
+    invariant to uniform scaling) — Canny+Hough on a full 1200 px frame was a
+    large share of preprocessing wall-time for a result that only needs one
+    scalar angle.
     """
     if len(image.shape) == 3:
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     else:
         gray = image
 
+    # Downscaled search copy: Canny+Hough cost scales with pixel count.
+    h0, w0 = gray.shape[:2]
+    max_side = max(h0, w0)
+    scale = min(1.0, 600.0 / max_side)
+    if scale < 1.0:
+        search = cv2.resize(gray, (int(w0 * scale), int(h0 * scale)), interpolation=cv2.INTER_AREA)
+    else:
+        search = gray
+
     # Blurry/low-texture photos return few lines; widen the Canny aperture so
     # we still find the package edges.
-    edges = cv2.Canny(gray, 50, 150, apertureSize=3)
+    edges = cv2.Canny(search, 50, 150, apertureSize=3)
     lines = cv2.HoughLinesP(
         edges,
         rho=1,
         theta=np.pi / 180,
         threshold=80,
-        minLineLength=min(gray.shape) // 4,
+        minLineLength=max(8, min(search.shape) // 4),
         maxLineGap=15,
     )
     if lines is None or len(lines) == 0:
@@ -71,9 +85,10 @@ def deskew_image(image: np.ndarray, max_angle: float = 15.0) -> Tuple[np.ndarray
     m = cv2.getRotationMatrix2D(center, median_angle, 1.0)
     # expand=True would bleed black borders that the OCR detector reads as
     # text regions; keep the original size and lose only the corners.
+    border_value = 255 if gray.ndim == 2 else (255, 255, 255)
     rotated = cv2.warpAffine(
         image, m, (w, h), flags=cv2.INTER_CUBIC,
-        borderMode=cv2.BORDER_CONSTANT, borderValue=(255, 255, 255),
+        borderMode=cv2.BORDER_CONSTANT, borderValue=border_value,
     )
     return rotated, round(median_angle, 2)
 
@@ -85,19 +100,28 @@ def enhance_for_ocr(image: np.ndarray) -> np.ndarray:
     interpolation blurs it further), then denoise, then CLAHE on the clean
     result, then a bounded upscale so small statutory print gains pixels.
     Returns the enhanced 3-channel BGR image (OCR engines expect color).
+
+    Performance (this pipeline is on the critical path of EVERY scan):
+    - Non-local-means denoising (fastNlMeansDenoisingColored) measured the
+      single largest preprocessing cost by far — tens of seconds on large
+      frames — while the grayscale output made its color machinery moot.
+      Bilateral filtering preserves edges the same way at a small fraction of
+      the cost, on grayscale only.
+    - Deskew's Hough search runs on a downscaled copy (see deskew_image).
     """
     if image is None or image.size == 0:
         return image
 
-    deskewed, _angle = deskew_image(image)
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image.copy()
 
-    # Non-local-means is far stronger than a 3x3 Gaussian on JPEG/halftone
-    # noise, at a cost only on the CPU — fine at OCR_MAX_DIMENSION <= 1200.
-    denoised = cv2.fastNlMeansDenoisingColored(deskewed, None, h=6, hColor=6, templateWindowSize=7, searchWindowSize=15)
+    deskewed, _angle = deskew_image(gray)
 
-    gray = cv2.cvtColor(denoised, cv2.COLOR_BGR2GRAY)
+    # Edge-preserving denoise on grayscale only; d=9 keeps statutory small
+    # print while flattening JPEG/halftone noise.
+    denoised = cv2.bilateralFilter(deskewed, d=9, sigmaColor=50, sigmaSpace=7)
+
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    enhanced = clahe.apply(gray)
+    enhanced = clahe.apply(denoised)
 
     # Bounded upscale: small labels (e.g. a 200 px-wide shampoo sachet) gain
     # recognition from 1.5x; capping the long side at 1600 keeps inference

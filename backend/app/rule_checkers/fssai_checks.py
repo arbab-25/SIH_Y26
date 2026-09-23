@@ -34,9 +34,17 @@ def run_fssai_checks(
     ingredients_declared: bool,
     nutritional_info_declared: bool,
     veg_nonveg_symbol: Optional[str],
-    confidence: float
+    confidence: float,
+    veg_nonveg_result: Optional[Dict[str, Any]] = None,
 ) -> List[CheckResult]:
-    """Execute Food Safety and Standards Act checks for food products."""
+    """Execute Food Safety and Standards Act checks for food products.
+
+    veg_nonveg_result is the OpenCV dot-analysis dict ({"detected", "symbol",
+    "confidence"}) from run_ocr metadata. When provided, the mandatory veg /
+    non-veg symbol is actually evaluated; a not-detected dot routes to
+    NEEDS_REVIEW rather than a violation — the symbol may sit on a panel the
+    photo did not capture, and §3 forbids guessing a violation.
+    """
     results: List[CheckResult] = []
 
     cat_lower = (category or "").lower()
@@ -152,5 +160,43 @@ def run_fssai_checks(
             quoted_rule_text=quoted_fssai,
             severity="MAJOR"
         ))
+
+    # 4. Veg / Non-veg symbol — evaluated only when the OpenCV dot analysis
+    # actually ran (veg_nonveg_result provided) or a symbol was passed in.
+    # Previously the parameter was accepted and silently ignored, so the
+    # mandatory symbol check never ran at all.
+    symbol = veg_nonveg_symbol or (veg_nonveg_result or {}).get("symbol")
+    analysis_ran = veg_nonveg_result is not None or bool(symbol)
+    if analysis_ran:
+        detected = bool((veg_nonveg_result or {}).get("detected")) or bool(symbol)
+        if detected and symbol:
+            results.append(CheckResult(
+                field="veg_nonveg_symbol",
+                status=Verdict.COMPLIANT,
+                confidence=float((veg_nonveg_result or {}).get("confidence") or confidence),
+                rule_ref="fssai-reg-2-2-2",
+                message_en=f"{symbol.replace('_', '-').title()} symbol detected on the captured panel.",
+                message_hi=f"कैप्चर किए गए पैनल पर {'शाकाहारी' if symbol == 'VEGETARIAN' else 'मांसाहारी'} चिह्न पाया गया।",
+                quoted_rule_text=quoted_fssai,
+                extracted_value=str(symbol),
+            ))
+        else:
+            results.append(CheckResult(
+                field="veg_nonveg_symbol",
+                status=Verdict.NEEDS_REVIEW,
+                confidence=confidence,
+                rule_ref="fssai-reg-2-2-2",
+                message_en=(
+                    "Veg/non-veg symbol not detected on the captured panel. It is mandatory on packaged food — "
+                    "verify the symbol (green circle / brown triangle) on the physical package."
+                ),
+                message_hi=(
+                    "कैप्चर किए गए पैनल पर शाकाहारी/मांसाहारी चिह्न नहीं मिला। यह पैकेज्ड खाद्य पर अनिवार्य है — "
+                    "भौतिक पैकेज पर चिह्न (हरा वृत्त / भूरा त्रिभुज) जांचें।"
+                ),
+                suggested_fix="Verify the veg/non-veg symbol on the package's principal display panel.",
+                quoted_rule_text=quoted_fssai,
+                severity="MAJOR"
+            ))
 
     return results

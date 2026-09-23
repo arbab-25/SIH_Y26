@@ -20,6 +20,12 @@ from app.services.auth_service import hash_password
 def _demo_credentials():
     """Demo account credentials from env vars ONLY (no insecure defaults).
 
+    Values set in backend/.env are honored: the seed script loads the same
+    dotenv file the application config uses, so a locally-configured .env is
+    enough for accounts to exist. Before this, the script read only the process
+    environment — DEMO_* lines in .env were silently ignored, no accounts were
+    created, and a fresh deployment had no way to sign in.
+
     Legacy deployments that relied on the old hardcoded demo logins can set:
       DEMO_INSPECTOR_EMAIL=inspector@demo.gov.in  DEMO_INSPECTOR_PASSWORD=Demo@1234
       DEMO_ADMIN_EMAIL=admin@codemaze.app         DEMO_ADMIN_PASSWORD=Admin@1234
@@ -27,6 +33,11 @@ def _demo_credentials():
     a warning rather than inventing a password.
     """
     import os
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
+    except ImportError:
+        pass  # python-dotenv ships with pydantic-settings; absence is unheard of
 
     inspector = (
         os.environ.get("DEMO_INSPECTOR_EMAIL", "").strip(),
