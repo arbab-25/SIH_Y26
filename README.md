@@ -44,18 +44,34 @@ Render secret environment variables (set in the Render dashboard, never in git):
 
 On boot the backend runs `render_start.sh`: waits for the database, applies Alembic migrations, seeds the full rule book + schedules + demo accounts, then starts uvicorn.
 
-## Demo accounts (seeded)
+## Demo accounts (env-seeded — no hardcoded credentials)
 
-- Inspector: `inspector@demo.gov.in` / `Demo@1234`
-- Admin: `admin@codemaze.app` / `Admin@1234`
+The seed script **refuses to invent passwords**. Set these env vars before
+`python seed/seed_db.py` (or configure them in the Render dashboard):
+
+```
+DEMO_INSPECTOR_EMAIL=inspector@your-domain.gov.in
+DEMO_INSPECTOR_PASSWORD=<long random password>
+DEMO_ADMIN_EMAIL=admin@your-domain.gov.in
+DEMO_ADMIN_PASSWORD=<long random password>
+RULE_VERSION_CODE=LMPC-2011-GSR629E-2018   # optional, stamps scans
+```
+
+The script prints only the account emails, never the passwords.
 
 ## Verification
 
 ```text
-cd frontend && npm ci && npm run build
-cd ../backend && python -m pytest          # 115 tests, ~5 s, 0 warnings
-cd ../backend && CODEMAZE_E2E=1 python -m pytest tests/test_e2e_local_journey.py -q -s
+cd frontend && npm ci && npm run build && npm run lint
+cd ../backend && python -m pytest          # 172 tests, ~11 s
+cd ../backend && python scripts/benchmark_ocr.py   # OCR field precision/recall
+cd ../frontend && npx playwright install chromium && npm run e2e   # needs E2E_TEST_EMAIL/PASSWORD
 ```
+
+The benchmark prints per-field precision/recall plus a macro average over the
+labeled seed set in `backend/tests/benchdata/` (synthetic; see the protocol in
+`docs/EVALUATION.md` for real-photo evaluation). Playwright e2e runs against a
+live environment and self-skips when no credentials are configured.
 
 The second command is the full journey — sign-in, a real label photograph through the OCR engine, the rule engine, report generation, PDF, email and history — and is skipped by default because it needs an OCR engine and `assets/test 1.jpeg`.
 
@@ -91,3 +107,51 @@ Every mandatory declaration in Rule 6(1) of the Legal Metrology (Packaged Commod
 - CORS restricted to configured origins; API docs (`/docs`) disabled unless `DEBUG=true`.
 - Input sanitization on auth fields; parameterized SQLAlchemy queries throughout (no raw SQL string interpolation).
 - `.env`, SQLite DBs, and `__pycache__` are git-ignored.
+
+---
+
+## Architecture (post Phase 1–5 upgrades)
+
+```
+Label photo ──► Upload API (202) ──► dispatch
+                                     ├─ RQ + Redis worker (REDIS_URL set)
+                                     └─ in-process background task (fallback)
+OCR: RapidOCR (PP-OCR ONNX) ⇄ Tesseract fallback
+Preprocess: deskew (Hough) → NL-means denoise → CLAHE → bounded upscale
+Cross-check: pyzbar EAN/QR → confirm / demote / fill-at-review
+Deterministic rule engine (no ML decides verdicts) ──► Postgres + audit trail
+Report: WeasyPrint PDF (mirrored to S3/R2 when STORAGE_BACKEND=s3) + openpyxl Excel
+Frontend: React 19 + TanStack Query + react-i18next (en/hi) + PWA (offline queue)
+```
+
+### Optional services (all degrade gracefully)
+
+| Service | Env var | When unset | Free option |
+| --- | --- | --- | --- |
+| Job queue + cache | `REDIS_URL` | Scans run in-process, no caching | Valkey 8 (open source), Upstash free Redis |
+| Object storage | `STORAGE_BACKEND=s3` + `S3_*` | Local `uploads/` dir | Cloudflare R2 (10 GB) |
+| Error tracking | `SENTRY_DSN` | Fully disabled, zero overhead | sentry.io developer tier |
+| Email | `SMTP_*` / `RESEND_API_KEY` | Mock-delivered + logged | Brevo free tier / Gmail app password |
+
+### Job queue & worker
+
+With `REDIS_URL` set, scans run in an RQ worker (`python -m app.worker`,
+queue `scans`) and `GET /scans/{id}/job` reports both the RQ job state and the
+authoritative scan row. `docker compose up` provisions Valkey + the worker
+automatically; on Render add the `codemaze-worker` service from `render.yaml`
+(worker instances need a paid plan — otherwise keep scans in-process on the
+free tier; the API behaves identically without Redis).
+
+### CI/CD
+
+GitHub Actions runs on every push/PR: backend lint (ruff), typecheck (mypy,
+informational), pytest, pip-audit; frontend oxlint, build, npm audit.
+Dependabot updates pip/npm/actions weekly-monthly. Playwright e2e
+(`npm run e2e`) is repo-available and self-skips without seeded credentials.
+
+### UptimeRobot (avoid free-tier cold starts)
+
+Free plan, 50 monitors: HTTP monitor → `https://codemaze-api-m6f0.onrender.com/api/v1/health`
+every 5–10 minutes. The deep health check reports `db_ok`, `redis_ok` and the
+loaded OCR engine, so the monitor doubles as a status dashboard. This keeps
+the Render instance warm and avoids ~50 s cold-start spins for inspectors.
