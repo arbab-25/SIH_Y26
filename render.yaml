@@ -129,6 +129,31 @@ services:
         source: /*
         destination: /index.html   # SPA fallback — all routes served by index.html
     headers:
+      # ── Security headers (mirror of backend SecurityHeadersMiddleware) ──
+      # These raise the Mozilla Observatory / securityheaders.com grade of the
+      # static site. CSP allows same-origin assets + Google Fonts (the Inter /
+      # Noto Sans families imported by src/index.css) + the API origin.
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+      - path: /*
+        name: Permissions-Policy
+        value: camera=(self), microphone=(), geolocation=(self)
+      - path: /*
+        name: Strict-Transport-Security
+        value: max-age=31536000; includeSubDomains
+      - path: /*
+        name: Cross-Origin-Opener-Policy
+        value: same-origin
+      - path: /*
+        name: Content-Security-Policy
+        value: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://codemaze-api-m6f0.onrender.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
       # PWA service worker must never be HTTP-cached: it uses its own
       # update-check cycle (autoUpdate). Manifest + icons can cache briefly.
       - path: /sw.js
