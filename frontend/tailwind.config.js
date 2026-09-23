@@ -41,7 +41,7 @@ export default {
         error: '#DC2626',
       },
       fontFamily: {
-        sans: ['Inter', 'Noto Sans', 'Noto Sans Devanagari', 'sans-serif'],
+        sans: ['Inter Variable', 'Noto Sans Variable', 'Noto Sans Devanagari Variable', 'sans-serif'],
       },
       boxShadow: {
         'xs': '0 1px 2px 0 rgba(0, 0, 0, 0.04)',

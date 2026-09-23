@@ -29,7 +29,10 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,jpeg,woff2}'],
+        // woff2 is intentionally NOT precached: the font CSS declares every
+        // unicode subset (~700KB if all were pre-fetched). Fonts are instead
+        // runtime-cached CacheFirst below, so they're offline after first use.
+        globPatterns: ['**/*.{js,css,html,svg,png,jpeg}'],
         navigateFallback: '/index.html',
         runtimeCaching: [
           {
@@ -41,6 +44,17 @@ export default defineConfig({
               cacheName: 'rules-cache',
               expiration: { maxEntries: 50, maxAgeSeconds: 86400 },
               cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
+            // Self-hosted variable fonts: immutable, versioned URLs — perfect
+            // for CacheFirst. Keeps Hindi/English text rendering offline.
+            urlPattern: /\/assets\/.*\.woff2$/,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'font-cache',
+              expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 * 365 },
+              cacheableResponse: { statuses: [200] },
             },
           },
         ],

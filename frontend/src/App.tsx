@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { MobileTabBar } from './components/MobileTabBar';
@@ -6,16 +6,28 @@ import { LoginModal } from './components/LoginModal';
 import { HelpDrawer } from './components/HelpDrawer';
 import { GuidedTour } from './components/GuidedTour';
 import { ScanUpload } from './pages/ScanUpload';
-import { ScanSummary } from './pages/ScanSummary';
-import { DetailedAnalysis } from './pages/DetailedAnalysis';
-import { RuleBook } from './pages/RuleBook';
-import { ReportHistory } from './pages/ReportHistory';
-import { ScanHistory } from './pages/ScanHistory';
-import { Dashboard } from './pages/Dashboard';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ScanResult, User } from './types';
 import { api } from './utils/api';
 import { getPendingScansCount } from './utils/offlineQueue';
+
+// Tab pages are code-split so the initial bundle stays lean: Dashboard alone
+// pulls in recharts (~90KB gzipped). The scan workspace — the landing tab —
+// remains eager; everything else loads on first visit to its tab.
+const ScanSummary = lazy(() => import('./pages/ScanSummary').then((m) => ({ default: m.ScanSummary })));
+const DetailedAnalysis = lazy(() => import('./pages/DetailedAnalysis').then((m) => ({ default: m.DetailedAnalysis })));
+const RuleBook = lazy(() => import('./pages/RuleBook').then((m) => ({ default: m.RuleBook })));
+const ReportHistory = lazy(() => import('./pages/ReportHistory').then((m) => ({ default: m.ReportHistory })));
+const ScanHistory = lazy(() => import('./pages/ScanHistory').then((m) => ({ default: m.ScanHistory })));
+const Dashboard = lazy(() => import('./pages/Dashboard').then((m) => ({ default: m.Dashboard })));
+
+function TabFallback() {
+  return (
+    <div className="flex items-center justify-center py-24" role="status" aria-live="polite">
+      <div className="h-8 w-8 rounded-full border-4 border-slate-200 border-t-[#12355B] animate-spin" />
+    </div>
+  );
+}
 
 export function App() {
   const [activeTab, setActiveTab] = useState<string>('scan');
@@ -108,6 +120,7 @@ export function App() {
 
         {/* Scrollable Content Viewport */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto pb-20 md:pb-8">
+          <Suspense fallback={<TabFallback />}>
           {activeTab === 'scan' && (
             <div className="space-y-6">
               <ScanUpload
@@ -181,6 +194,7 @@ export function App() {
           )}
 
           {activeTab === 'dashboard' && <Dashboard lang={lang} />}
+          </Suspense>
         </main>
       </div>
 

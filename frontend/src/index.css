@@ -1,4 +1,13 @@
 
+/* Self-hosted variable fonts (Fontsource): same families as before, but
+   same-origin and never a third-party render-blocking stylesheet. The CSS
+   declares every unicode subset, but browsers download only the subsets a
+   page actually uses (latin for English, devanagari for Hindi). Must
+   precede @tailwind. */
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/noto-sans';
+@import '@fontsource-variable/noto-sans-devanagari';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
