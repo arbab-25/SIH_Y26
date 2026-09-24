@@ -184,12 +184,17 @@ every deploy to keep the numbers honest:
 
 | Checker | What it measures | How to run | Current result |
 | --- | --- | --- | --- |
-| Google PageSpeed / Lighthouse | Performance, a11y, best practices, SEO | Run against the frontend URL in Chrome DevTools → Lighthouse | run post-deploy, record here |
-| Mozilla HTTP Observatory | Header/security configuration | <https://developer.mozilla.org/en-US/observatory> | A-grade headers shipped (CSP, HSTS, XFO, COOP, CORP, nosniff, Referrer/Permissions-Policy) |
-| SecurityHeaders.com | Header grade | <https://securityheaders.com> scan of the API URL | same header set applies |
-| SSL Labs | TLS configuration | <https://www.ssllabs.com/ssltest/> (Render's shared cert) | platform-managed |
+| Google Lighthouse (v12 CLI) | Performance, a11y, best practices, SEO | `npx lighthouse@12 <frontend-url> --only-categories=performance,accessibility,best-practices,seo` | **Performance 92–95**, Accessibility **100**, Best Practices **100**, SEO **100** (FCP 2.3–2.5 s, LCP 2.5–2.7 s, TBT 0–40 ms, CLS 0.014) |
+| Mozilla HTTP Observatory | Header/security configuration | POST `https://observatory-api.mdn.mozilla.net/api/v2/scan?host=<host>` | API **A+ (130/100)** · Frontend **C (55)** — static-site headers are dashboard-managed on Render; copy the `customHeaders` block from `render.yaml` into the dashboard's Headers section to go A+ |
+| SSL Labs | TLS configuration | `https://api.ssllabs.com/api/v3/analyze?host=<host>&startNew=on&all=done` | **A+ on both hosts** (Render platform cert) |
+| SecurityHeaders.com | Header grade | Browser scan of the API URL | CLI-scrape blocked by a Cloudflare challenge; the identical header set scores **A+ on Observatory** (same test weights) |
+| Uptime / availability | Health endpoint liveness | `GET /api/v1/health` reports `db_ok`, `redis_ok`, OCR engine state | HTTP 200, healthy; add a free UptimeRobot monitor (below) to avoid cold starts |
 | Internal battery | code quality | `pytest`, `ruff`, `mypy`, `bandit`, `pip-audit`, `tsc`, `oxlint`, `npm audit` | all green (207 tests) |
 
 The header set is applied by `SecurityHeadersMiddleware` in `backend/app/main.py`;
 CSP is strict (`default-src 'none'`, scripts blocked, frame-ancestors 'none'),
-HSTS is always on behind Render's TLS.
+HSTS is always on behind Render's TLS. The same values are declared for the
+static frontend in `render.yaml` (`customHeaders`), but Render static sites are
+**dashboard-managed**: until those headers are added via Dashboard → the
+frontend service → Headers, third-party scanners grade the frontend's headers
+alone. The API host is unaffected and already grades A+.
